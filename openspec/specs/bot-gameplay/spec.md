@@ -12,7 +12,7 @@ The system SHALL launch a StarCraft II game instance and connect a Protoss bot t
 - **THEN** the system SHALL report an error message containing the missing map name, the expected Maps directory, and the `scripts/setup_maps.sh` helper path
 
 ### Requirement: Bot plays Protoss macro strategy
-The system SHALL execute a Protoss macro playstyle: constant probe production, base expansion, tech progression (including Forge, Twilight Council, and ground upgrades), army production (adaptive based on scouted enemy counters), and a final attack when max supply is reached. The bot SHALL detect gameplay events during each step and use them to make the strategy reactive. The bot SHALL use a phase-driven tactical camera to follow units based on game context. The bot SHALL send a scout probe to explore enemy starting locations. The bot SHALL fix gas economy by continuing to the next geyser when an assimilator is unaffordable and assigning workers to undersaturated assimilators.
+The system SHALL execute a Protoss macro playstyle: constant probe production, base expansion, tech progression (including Forge, Twilight Council, and ground upgrades), army production (adaptive based on scouted enemy counters), and attack decisions driven by the strategic decision engine instead of a fixed supply threshold. The bot SHALL detect gameplay events during each step and use them to make the strategy reactive. The bot SHALL use a phase-driven tactical camera to follow units based on game context. The bot SHALL send a scout probe to explore enemy starting locations. The bot SHALL fix gas economy by continuing to the next geyser when an assimilator is unaffordable and assigning workers to undersaturated assimilators. The bot SHALL optionally surrender when the decision engine determines victory is impossible.
 
 #### Scenario: Constant worker production
 - **WHEN** the bot has fewer than 70 probes and available supply
@@ -38,16 +38,20 @@ The system SHALL execute a Protoss macro playstyle: constant probe production, b
 - **WHEN** the bot has available resources and production capacity
 - **THEN** the bot SHALL produce army units (Stalkers, Zealots) from Gateways
 
-#### Scenario: Attack at max supply
-- **WHEN** the bot reaches 200 supply
-- **THEN** the bot SHALL send all army units to attack the enemy starting location. Attack commands SHALL take priority over defensive repositioning.
+#### Scenario: Attack driven by decision engine
+- **WHEN** the decision engine transitions to ATTACK state
+- **THEN** the bot SHALL send idle army units to attack the enemy starting location. Attack commands SHALL take priority over defensive repositioning.
+
+#### Scenario: Surrender when decision engine triggers
+- **WHEN** the decision engine transitions to SURRENDER state AND surrender is enabled
+- **THEN** the bot SHALL send `chat_send("gg")`, skip all remaining managers, and log a surrender event
 
 #### Scenario: Tactical camera in early game
 - **WHEN** the bot is in `EARLY_GAME` phase
 - **THEN** the camera SHALL follow the scout probe if one exists, otherwise center on the main base
 
 #### Scenario: Tactical camera during engagement
-- **WHEN** `attack_triggered` is True and army units exist
+- **WHEN** decision state is ATTACK and army units exist
 - **THEN** the camera SHALL follow the attacking army
 
 #### Scenario: Tactical camera during defense
@@ -147,3 +151,44 @@ The system SHALL execute `manage_defense()` on every `on_step` before `manage_at
 #### Scenario: Army engages when in range
 - **WHEN** army units are within 8 range of enemy units near a threatened base
 - **THEN** idle army units SHALL attack the closest enemy unit
+
+### Requirement: MyBot accepts surrender and fog configuration
+The system SHALL allow the caller to pass `surrender_enabled` and `fog_enabled` flags when constructing a `MyBot` instance.
+
+#### Scenario: Flags passed to bot
+- **WHEN** `MyBot(surrender_enabled=True, fog_enabled=True)` is constructed
+- **THEN** the bot SHALL store these values for use by the decision engine
+
+#### Scenario: Default values preserve current behavior
+- **WHEN** `MyBot()` is constructed with no arguments
+- **THEN** `surrender_enabled` SHALL be False and `fog_enabled` SHALL be False
+
+### Requirement: MyBot executes surrender on SURRENDER state
+The system SHALL implement `manage_surrender()` which triggers when the decision state is SURRENDER.
+
+#### Scenario: Surrender sends gg and stops actions
+- **WHEN** the decision state transitions to SURRENDER
+- **THEN** the bot SHALL call `chat_send("gg")` and the `manage_surrender()` method SHALL be called in `on_step()`
+
+#### Scenario: Surrender event logged
+- **WHEN** surrender is triggered
+- **THEN** a `surrender` event SHALL be written to the events file with details including game_time and army_value_ratio
+
+#### Scenario: Other managers skip when surrendered
+- **WHEN** the decision state is SURRENDER
+- **THEN** all other `manage_*()` methods SHALL be skipped in `on_step()`
+
+### Requirement: CLI exposes surrender and fog flags
+The system SHALL add `--surrender` and `--fog` flags to `scripts/run.py`.
+
+#### Scenario: Surrender flag enables surrender
+- **WHEN** `python scripts/run.py --surrender` is executed
+- **THEN** the bot SHALL be initialized with `surrender_enabled=True`
+
+#### Scenario: Fog flag enables fog-of-war
+- **WHEN** `python scripts/run.py --fog` is executed
+- **THEN** the game SHALL be started with `disable_fog=False` and the bot SHALL be initialized with `fog_enabled=True`
+
+#### Scenario: No flags preserves current behavior
+- **WHEN** `python scripts/run.py` is executed with no new flags
+- **THEN** the bot SHALL start with `surrender_enabled=False, fog_enabled=False` and `disable_fog=True`

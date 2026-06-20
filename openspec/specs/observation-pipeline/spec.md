@@ -5,7 +5,7 @@ The system SHALL implement an `extract_features()` function that transforms pyth
 
 #### Scenario: Feature extraction returns valid data
 - **WHEN** `extract_features()` is called during `on_step`
-- **THEN** the returned dictionary SHALL contain at minimum: minerals, vespene, collected_minerals, collected_vespene, supply_used, supply_cap, worker_count, army_count, enemy_visible_units, enemy_army_composition, enemy_army_analysis, enemy_threat_assessment, recommended_counters, our_army_composition, our_structures, bases, game_time_seconds, and expansion_count
+- **THEN** the returned dictionary SHALL contain at minimum: minerals, vespene, collected_minerals, collected_vespene, supply_used, supply_cap, worker_count, army_count, enemy_visible_units, enemy_worker_count, enemy_army_composition, enemy_army_analysis, enemy_threat_assessment, recommended_counters, our_army_composition, our_structures, our_army_value, enemy_army_value, army_value_ratio, enemy_t3_count, our_t3_count, bases, game_time_seconds, and expansion_count
 
 #### Scenario: Collected resources are available when score exists
 - **WHEN** `bot.state.score.collected_minerals` and `bot.state.score.collected_vespene` are accessible
@@ -119,3 +119,28 @@ The system SHALL include enriched enemy army analysis in extracted features. The
 #### Scenario: Counter recommendations empty when no enemy visible
 - **WHEN** no enemy units are visible
 - **THEN** `recommended_counters` SHALL be an empty dict
+
+### Requirement: Army value metrics are included in features
+The system SHALL include `our_army_value`, `enemy_army_value`, and `army_value_ratio` in the extracted features dictionary.
+
+#### Scenario: Army value fields present
+- **WHEN** `extract_features()` is called
+- **THEN** the returned dict SHALL contain `our_army_value` (int), `enemy_army_value` (int), and `army_value_ratio` (float)
+
+### Requirement: T3 unit counts are included in features
+The system SHALL include `enemy_t3_count` and `our_t3_count` in extracted features, counting only combat units classified as tier-3 for each race.
+
+#### Scenario: T3 counts present
+- **WHEN** `extract_features()` is called
+- **THEN** `enemy_t3_count` SHALL be the number of visible enemy T3 combat units and `our_t3_count` SHALL be the number of our T3 combat units
+
+#### Scenario: T3 counts zero when no T3 units
+- **WHEN** neither player has T3 units
+- **THEN** `enemy_t3_count` and `our_t3_count` SHALL both be 0
+
+### Requirement: Enemy worker count is included in features
+The system SHALL include `enemy_worker_count` in extracted features.
+
+#### Scenario: Worker count present
+- **WHEN** `extract_features()` is called
+- **THEN** `enemy_worker_count` SHALL be the count of visible enemy worker units (SCV, Drone, Probe)
