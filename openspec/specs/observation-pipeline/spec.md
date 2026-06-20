@@ -5,7 +5,7 @@ The system SHALL implement an `extract_features()` function that transforms pyth
 
 #### Scenario: Feature extraction returns valid data
 - **WHEN** `extract_features()` is called during `on_step`
-- **THEN** the returned dictionary SHALL contain at minimum: minerals, vespene, collected_minerals, collected_vespene, supply_used, supply_cap, worker_count, army_count, enemy_visible_units, enemy_army_composition, our_army_composition, our_structures, bases, game_time_seconds, and expansion_count
+- **THEN** the returned dictionary SHALL contain at minimum: minerals, vespene, collected_minerals, collected_vespene, supply_used, supply_cap, worker_count, army_count, enemy_visible_units, enemy_army_composition, enemy_army_analysis, enemy_threat_assessment, recommended_counters, our_army_composition, our_structures, bases, game_time_seconds, and expansion_count
 
 #### Scenario: Collected resources are available when score exists
 - **WHEN** `bot.state.score.collected_minerals` and `bot.state.score.collected_vespene` are accessible
@@ -96,3 +96,26 @@ The system SHALL continue to log extracted features at a configurable interval (
 #### Scenario: Logging interval is configurable
 - **WHEN** the bot is initialized with `log_interval=44`
 - **THEN** features SHALL be logged every 44 steps instead of the default 22
+
+### Requirement: Enemy army analysis is included in features
+The system SHALL include enriched enemy army analysis in extracted features. The analysis SHALL break down enemy composition by armor type (armored, light, biological, mechanical, massive, air), compute total HP and shields, and estimate ground and air DPS. The system SHALL also include a threat assessment ranking enemy unit types by danger and recommended counter units for Protoss.
+
+#### Scenario: Enemy analysis with visible units
+- **WHEN** enemy units are visible with known unit types
+- **THEN** `enemy_army_analysis` SHALL contain `armored_count`, `light_count`, `biological_count`, `mechanical_count`, `massive_count`, `air_count`, `total_hp`, `total_shields`, `ground_dps`, and `air_dps`
+
+#### Scenario: Enemy analysis with no visible units
+- **WHEN** no enemy units are visible
+- **THEN** `enemy_army_analysis` SHALL contain all fields with zero or 0.0 values
+
+#### Scenario: Threat assessment ranks enemies
+- **WHEN** enemy units are visible
+- **THEN** `enemy_threat_assessment` SHALL be a dict mapping enemy unit type names to threat scores, sorted from highest to lowest
+
+#### Scenario: Counter recommendations provided
+- **WHEN** enemy units are visible
+- **THEN** `recommended_counters` SHALL be a dict mapping Protoss unit type names to counter scores, sorted from highest to lowest
+
+#### Scenario: Counter recommendations empty when no enemy visible
+- **WHEN** no enemy units are visible
+- **THEN** `recommended_counters` SHALL be an empty dict

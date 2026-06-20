@@ -12,7 +12,7 @@ The system SHALL launch a StarCraft II game instance and connect a Protoss bot t
 - **THEN** the system SHALL report an error message containing the missing map name, the expected Maps directory, and the `scripts/setup_maps.sh` helper path
 
 ### Requirement: Bot plays Protoss macro strategy
-The system SHALL execute a Protoss macro playstyle: constant probe production, base expansion, tech progression, army production, and a final attack when max supply is reached. The bot SHALL detect gameplay events during each step and use them to make the strategy reactive. The bot SHALL use a phase-driven tactical camera to follow units based on game context.
+The system SHALL execute a Protoss macro playstyle: constant probe production, base expansion, tech progression (including Forge, Twilight Council, and ground upgrades), army production (adaptive based on scouted enemy counters), and a final attack when max supply is reached. The bot SHALL detect gameplay events during each step and use them to make the strategy reactive. The bot SHALL use a phase-driven tactical camera to follow units based on game context. The bot SHALL send a scout probe to explore enemy starting locations. The bot SHALL fix gas economy by continuing to the next geyser when an assimilator is unaffordable and assigning workers to undersaturated assimilators.
 
 #### Scenario: Constant worker production
 - **WHEN** the bot has fewer than 70 probes and available supply
