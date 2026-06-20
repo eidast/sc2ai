@@ -5,6 +5,7 @@ description = "SC2 AI bot — Protoss macro player built with python-sc2. Recrea
 requires-python = ">=3.9"
 dependencies = [
     "burnysc2",
+    "pyyaml>=6.0",
 ]
 
 [build-system]
@@ -17,4 +18,9 @@ packages = ["src"]
 [tool.uv]
 dev-dependencies = [
     "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]

@@ -1,5 +1,6 @@
 from enum import Enum, auto
 from dataclasses import dataclass, field
+import math
 from typing import Any
 
 
@@ -16,6 +17,30 @@ class ScoutIntel:
     enemy_race_confirmed: str | None = None
     enemy_structures_seen: list[str] = field(default_factory=list)
     last_scout_time: float = 0.0
+
+
+class ScoutMetadata:
+    def __init__(self, decay_rate: float = 0.05):
+        self._units: dict[str, dict] = {}
+        self._decay_rate = decay_rate
+
+    def observe(self, unit_type_name: str, game_time: float) -> None:
+        self._units[unit_type_name] = {
+            "last_seen": game_time,
+            "confidence": 1.0,
+        }
+
+    def apply_decay(self, current_time: float) -> None:
+        for unit_data in self._units.values():
+            delta = current_time - unit_data["last_seen"]
+            if delta > 0:
+                unit_data["confidence"] = math.exp(-self._decay_rate * delta)
+
+    def to_dict(self) -> dict[str, dict]:
+        return dict(self._units)
+
+    def clear(self) -> None:
+        self._units.clear()
 
 
 def get_scout_waypoints(

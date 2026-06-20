@@ -205,3 +205,37 @@ def _extract_base_features(bot: BotAI) -> list[dict]:
         })
 
     return bases
+
+
+def extract_building_inference(bot) -> dict[str, int]:
+    result = {}
+    for structure in bot.enemy_structures:
+        name = structure.type_id.name
+        result[name] = result.get(name, 0) + 1
+    return result
+
+
+def extract_eco_inference(features: dict) -> dict:
+    game_time = features.get("game_time_seconds", 0)
+    bases_count = features.get("expansion_count", 1)
+    enemy_workers = features.get("enemy_worker_count", 0)
+
+    if enemy_workers == 0 and bases_count > 0 and game_time > 60:
+        estimated = min(int(game_time * 0.45 * bases_count), 90)
+    else:
+        estimated = enemy_workers
+
+    gas_count = 0
+    building_inference = features.get("building_inference", {})
+    for name, count in building_inference.items():
+        if "ASSIMILATOR" in name.upper() or "EXTRACTOR" in name.upper() or "REFINERY" in name.upper():
+            gas_count += count
+
+    return {
+        "bases_count": building_inference.get("TOWNHALL", 0)
+        or building_inference.get("HATCHERY", 0)
+        or building_inference.get("COMMANDCENTER", 0)
+        or 1,
+        "gas_count": gas_count,
+        "estimated_workers": estimated,
+    }

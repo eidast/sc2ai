@@ -1,0 +1,47 @@
+name: robo_open
+race: Protoss
+description: "Apertura con Robo, transición a ground-heavy. Fuerte contra Terran."
+
+initial_biases:
+  gateway_units: 0.5
+  stargate_units: 0.15
+  robo_units: 0.75
+  fast_expand: 0.5
+  gas_heavy: 0.5
+  air_upgrades: 0.2
+  ground_upgrades: 0.8
+
+scouting_adjustments:
+  - condition: enemy_army_analysis.air_count > 5
+    biases:
+      stargate_units: 0.20
+      gateway_units: 0.10
+  - condition: enemy_army_analysis.biological_count > 3
+    biases:
+      robo_units: 0.10
+      ground_upgrades: 0.10
+  - condition: enemy_army_analysis.massive_count > 0
+    biases:
+      robo_units: 0.15
+
+priority_formulas:
+  STALKER: "gateway_units * 0.5 * (1 - own_ratio('STALKER'))"
+  ZEALOT: "gateway_units * 0.4 * (1 - own_ratio('ZEALOT'))"
+  IMMORTAL: "robo_units * 0.8 * (1 - own_ratio('IMMORTAL'))"
+  COLOSSUS: "robo_units * 0.7 * ground_upgrades * (1 - own_ratio('COLOSSUS'))"
+  DISRUPTOR: "robo_units * 0.6 * ground_upgrades * (1 - own_ratio('DISRUPTOR'))"
+  OBSERVER: "robo_units * 0.3 * (has_enemy ? 0.5 : 0.1)"
+  GATEWAY: "(gateway_units + (1 - robo_units) * 0.2) * (bases * 3 - has_structure('GATEWAY') * 2) / (bases * 3 + 1)"
+  CYBERNETICSCORE: "gateway_units * (1 - has_structure('CYBERNETICSCORE'))"
+  ROBOTICSFACILITY: "robo_units * (has_structure('CYBERNETICSCORE') * (1 - max(0, has_structure('ROBOTICSFACILITY') - bases) / (bases + 1)))"
+  NEXUS: "fast_expand * 0.5 + (minerals > 500 ? 0.3 : 0)"
+  FORGE: "ground_upgrades * (1 - has_structure('FORGE')) * (minerals > 300 ? 0.5 : 0.2)"
+  PROBE: "(workers < 70 ? (1 - workers / 70) : 0)"
+  PYLON: "supply_left < 4 ? 2.0 : 0.1"
+  ASSIMILATOR: "gas_heavy * (has_structure('ASSIMILATOR') < bases * 2 ? 1 : 0)"
+
+meta:
+  bias_speed: 0.3
+  scout_decay_rate: 0.05
+  max_workers: 70
+  target_bases: 4

@@ -1,0 +1,57 @@
+description: "Macro est\xE1ndar con gateway-heavy, transici\xF3n Robo y upgrades de\
+  \ ground"
+initial_biases:
+  air_upgrades: 0.3
+  fast_expand: 0.6
+  gas_heavy: 0.4
+  gateway_units: 0.7
+  ground_upgrades: 0.7
+  robo_units: 0.2
+  stargate_units: 0.2
+meta:
+  bias_speed: 0.3
+  max_workers: 70
+  scout_decay_rate: 0.05
+  target_bases: 4
+name: standard_macro
+priority_formulas:
+  ASSIMILATOR: 'gas_heavy * (has_structure(''ASSIMILATOR'') < bases * 2 ? 1 : 0)'
+  COLOSSUS: robo_units * 0.6 * ground_upgrades * (1 - own_ratio('COLOSSUS'))
+  CYBERNETICSCORE: gateway_units * (1 - has_structure('CYBERNETICSCORE'))
+  FORGE: 'ground_upgrades * (1 - has_structure(''FORGE'')) * (minerals > 300 ? 0.5
+    : 0.2)'
+  GATEWAY: '(gateway_units + (1 - robo_units) * 0.3) * (bases < 1 ? 1 : (bases * 3
+    - (has_structure(''GATEWAY'') * 2)) / (bases * 3 + 1))'
+  IMMORTAL: robo_units * 0.8 * (1 - own_ratio('IMMORTAL'))
+  NEXUS: 'fast_expand * 0.6 + (minerals > 500 ? 0.4 : 0)'
+  PHOENIX: stargate_units * 0.5 * (1 - own_ratio('PHOENIX'))
+  PROBE: '(workers < 70 ? (1 - workers / 70) : 0)'
+  PROTOSSGROUNDWEAPONSLEVEL1: ground_upgrades * (1 - has_upgrade('PROTOSSGROUNDWEAPONSLEVEL1'))
+    * has_structure('FORGE')
+  PYLON: 'supply_left < 4 ? 2.0 : 0.1'
+  ROBOTICSFACILITY: robo_units * (has_structure('CYBERNETICSCORE') * (1 - max(0, has_structure('ROBOTICSFACILITY')
+    - bases) / (bases + 1)))
+  SENTRY: gateway_units * 0.2 * (1 - own_ratio('SENTRY'))
+  STALKER: (gateway_units * 0.6 + (1 - robo_units) * 0.3) * (1 - own_ratio('STALKER'))
+  STARGATE: stargate_units * (has_structure('CYBERNETICSCORE') * (1 - max(0, has_structure('STARGATE')
+    - bases) / (bases + 1)))
+  TWILIGHTCOUNCIL: 'gateway_units * 0.3 * (1 - has_structure(''TWILIGHTCOUNCIL''))
+    * (minerals > 300 and vespene > 100 ? 0.8 : 0.1)'
+  VOIDRAY: stargate_units * 0.7 * (1 - own_ratio('VOIDRAY'))
+  WARPGATERESEARCH: gateway_units * (1 - has_upgrade('WARPGATERESEARCH')) * has_structure('CYBERNETICSCORE')
+  ZEALOT: gateway_units * 0.5 * (1 - own_ratio('ZEALOT'))
+race: Protoss
+scouting_adjustments:
+- biases:
+    air_upgrades: 0.2
+    gateway_units: 0.1
+    stargate_units: 0.25
+  condition: enemy_army_analysis.air_count > 5
+- biases:
+    gateway_units: 0.1
+    robo_units: 0.2
+  condition: enemy_army_analysis.mechanical_count > enemy_army_analysis.biological_count
+- biases:
+    gateway_units: 0.2
+    robo_units: 0.1
+  condition: enemy_army_analysis.biological_count > 3

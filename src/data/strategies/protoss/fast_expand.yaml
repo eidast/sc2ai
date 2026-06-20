@@ -1,0 +1,42 @@
+name: fast_expand
+race: Protoss
+description: "Apertura económica con nexus temprano antes de Cyber Core."
+
+initial_biases:
+  gateway_units: 0.5
+  stargate_units: 0.25
+  robo_units: 0.35
+  fast_expand: 0.8
+  gas_heavy: 0.3
+  air_upgrades: 0.3
+  ground_upgrades: 0.6
+
+scouting_adjustments:
+  - condition: enemy_army_analysis.air_count > 5
+    biases:
+      stargate_units: 0.20
+  - condition: enemy_army_analysis.ground_dps > 100
+    biases:
+      robo_units: 0.15
+      gateway_units: 0.10
+
+priority_formulas:
+  STALKER: "gateway_units * 0.5 * (1 - own_ratio('STALKER'))"
+  ZEALOT: "gateway_units * 0.4 * (1 - own_ratio('ZEALOT'))"
+  IMMORTAL: "robo_units * 0.7 * (1 - own_ratio('IMMORTAL'))"
+  VOIDRAY: "stargate_units * 0.6 * (1 - own_ratio('VOIDRAY'))"
+  PHOENIX: "stargate_units * 0.5 * (1 - own_ratio('PHOENIX'))"
+  GATEWAY: "gateway_units * (bases * 3 - has_structure('GATEWAY') * 2) / (bases * 3 + 1)"
+  CYBERNETICSCORE: "gateway_units * (1 - has_structure('CYBERNETICSCORE'))"
+  STARGATE: "stargate_units * (has_structure('CYBERNETICSCORE') * (1 - max(0, has_structure('STARGATE') - bases) / (bases + 1)))"
+  ROBOTICSFACILITY: "robo_units * (has_structure('CYBERNETICSCORE') * (1 - max(0, has_structure('ROBOTICSFACILITY') - bases) / (bases + 1)))"
+  NEXUS: "fast_expand * 0.7 + (minerals > 400 ? 0.5 : 0.1)"
+  PROBE: "(workers < 75 ? (1 - workers / 75) : 0)"
+  PYLON: "supply_left < 4 ? 2.0 : 0.1"
+  ASSIMILATOR: "gas_heavy * (has_structure('ASSIMILATOR') < bases * 2 ? 1 : 0)"
+
+meta:
+  bias_speed: 0.25
+  scout_decay_rate: 0.05
+  max_workers: 75
+  target_bases: 5

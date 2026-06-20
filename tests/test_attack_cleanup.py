@@ -45,7 +45,7 @@ def _bot_with_army(army):
 def test_attack_prioritizes_visible_enemy_structure():
     army_unit = FakeUnit(0, 0)
     visible_structure = FakeUnit(30, 30)
-    bot = _bot_with_army([army_unit])
+    bot = _bot_with_army([army_unit] * 4)
     bot.enemy_structures = FakeUnits([visible_structure])
 
     asyncio.run(bot.manage_attack())
@@ -55,7 +55,7 @@ def test_attack_prioritizes_visible_enemy_structure():
 
 def test_attack_uses_cleanup_waypoint_when_no_structure_visible():
     army_unit = FakeUnit(0, 0)
-    bot = _bot_with_army([army_unit])
+    bot = _bot_with_army([army_unit] * 4)
     bot._cleanup_target_index = 1
 
     asyncio.run(bot.manage_attack())
@@ -65,7 +65,7 @@ def test_attack_uses_cleanup_waypoint_when_no_structure_visible():
 
 def test_cleanup_waypoint_advances_after_army_reaches_target():
     army_unit = FakeUnit(101, 100)
-    bot = _bot_with_army([army_unit])
+    bot = _bot_with_army([army_unit] * 4)
     bot._cleanup_target_index = 0
 
     asyncio.run(bot.manage_attack())
