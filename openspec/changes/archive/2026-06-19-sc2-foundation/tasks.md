@@ -11,7 +11,7 @@
 - [x] 2.1 Create `pyproject.toml` with `burnysc2` dependency and project metadata
 - [x] 2.2 Run `uv sync` to install dependencies and generate lockfile
 - [x] 2.3 Verify `burnysc2` imports successfully in a Python shell
-- [ ] 2.4 Commit lockfile to repository
+- [x] 2.4 Commit lockfile to repository
 
 ## 3. Documentation
 
@@ -50,8 +50,8 @@
 
 ## 8. Verification
 
-- [ ] 8.1 Run `scripts/run.py` and confirm SC2 launches, bot plays Protoss macro, match completes
-- [ ] 8.2 Verify replay file is saved to `replays/` after match
-- [ ] 8.3 Verify feature logs appear in console output
-- [ ] 8.4 Verify bot reaches 200 supply and attacks successfully
-- [ ] 8.5 Push all commits to GitHub and confirm repo is accessible
+- [x] 8.1 Run `scripts/run.py` and confirm SC2 launches, bot plays Protoss macro, match completes
+- [x] 8.2 Verify replay file is saved to `replays/` after match
+- [x] 8.3 Verify feature logs appear in console output
+- [x] 8.4 Verify bot reaches 200 supply and attacks successfully
+- [x] 8.5 Push all commits to GitHub and confirm repo is accessible

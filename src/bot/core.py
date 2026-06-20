@@ -13,12 +13,12 @@ from src.utils.replay import save_replay
 class MyBot(BotAI):
     MAX_WORKERS = 70
     ATTACK_SUPPLY = 200
-    LOG_INTERVAL = 22
 
-    def __init__(self):
+    def __init__(self, log_interval: int = 22):
         super().__init__()
         self.attack_triggered = False
         self.logger = setup_logger()
+        self.log_interval = log_interval
         self._last_log = 0
 
     async def on_start(self):
@@ -31,7 +31,7 @@ class MyBot(BotAI):
 
         features = extract_features(self)
 
-        if iteration - self._last_log >= self.LOG_INTERVAL:
+        if iteration - self._last_log >= self.log_interval:
             log_features(self.logger, features, iteration)
             self._last_log = iteration
 
