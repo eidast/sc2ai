@@ -1,0 +1,13 @@
+[project]
+name = "sc2ai"
+version = "0.1.0"
+description = "SC2 AI bot — Protoss macro player built with python-sc2. Recreational/academic project architected for future ML integration."
+requires-python = ">=3.9"
+dependencies = [
+    "burnysc2",
+]
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=8.0",
+]

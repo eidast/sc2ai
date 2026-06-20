@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Project data
+maps/
+replays/
+
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
