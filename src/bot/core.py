@@ -142,9 +142,8 @@ class MyBot(BotAI):
 
         if self._decision_state == DecisionState.WON and not self._surrender_fired:
             self._surrender_fired = True
-            self.logger.info("Victory — enemy eliminated, ending game")
-            await self.client.leave()
-            return
+            self.logger.info("Victory — enemy eliminated, standing by")
+            await self.chat_send("gg")
 
         if self._decision_state in (DecisionState.SURRENDER, DecisionState.WON):
             if self._events_file:
