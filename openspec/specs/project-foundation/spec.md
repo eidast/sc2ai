@@ -8,11 +8,11 @@ The system SHALL have a public GitHub repository at `github.com/eidast/sc2ai` wi
 - **THEN** the repository SHALL be publicly accessible with a README visible on the landing page
 
 ### Requirement: Python project uses uv for dependency management
-The system SHALL use `uv` as the package manager with a `pyproject.toml` file declaring `burnysc2` as the primary dependency.
+The system SHALL use `uv` as the package manager with a `pyproject.toml` file declaring `burnysc2` as the primary dependency. The project SHALL be configured as an installable package using `hatchling` as the build backend so that `uv sync` installs it in editable mode, making `src` importable without manual `PYTHONPATH` configuration.
 
 #### Scenario: Dependencies install cleanly
 - **WHEN** running `uv sync` in the project root
-- **THEN** all dependencies SHALL install without errors and `burnysc2` SHALL be importable
+- **THEN** all dependencies SHALL install without errors, `burnysc2` SHALL be importable, and the project itself SHALL be installed in editable mode
 
 ### Requirement: Bilingual README
 The project SHALL include a README.md with content in both Spanish and English. Spanish content SHALL appear first, followed by English content, and each language SHALL have a clear section header.
@@ -48,3 +48,14 @@ The project SHALL include pytest coverage for foundation behavior that can be va
 #### Scenario: Local verification runs successfully
 - **WHEN** running `uv run pytest`
 - **THEN** tests for map error handling, logging interval configuration, feature dictionary logging, feature extraction shape, and README language ordering SHALL pass
+
+### Requirement: Module imports work after editable install
+The project SHALL be importable as `src` after `uv sync` completes, without requiring manual `sys.path` manipulation or `PYTHONPATH` environment variables.
+
+#### Scenario: Module imports work
+- **WHEN** running `uv run python -c "from src.bot.core import MyBot"`
+- **THEN** the import SHALL succeed without errors
+
+#### Scenario: Script launch works after editable install
+- **WHEN** running `uv run python scripts/run.py`
+- **THEN** the import `from src.bot.core import MyBot` SHALL succeed and the script SHALL proceed to map resolution

@@ -10,10 +10,11 @@ El bot juega **Protoss** con un estilo macro: expandir, producir sondas y ejérc
 
 ### Requisitos
 
-- **StarCraft II** instalado en macOS: `/Applications/StarCraft II/`
+- **StarCraft II** instalado (la edición gratuita Starter Edition funciona):
+  - macOS: `/Applications/StarCraft II/`
+  - Windows 11: `C:\Program Files (x86)\StarCraft II\`
 - **Python 3.9+** probado con 3.13
 - **uv** para gestión de dependencias
-- **Mapas** de ladder descargados en `/Applications/StarCraft II/Maps/`
 
 ### Instalación
 
@@ -23,19 +24,25 @@ cd sc2ai
 uv sync
 ```
 
+`uv sync` instala las dependencias y configura el proyecto en modo editable — no necesitás pasos extra.
+
 ### Mapas
 
-Descarga los map packs oficiales de Blizzard o de [AI Arena](https://aiarena.net/wiki/maps/) y extráelos en:
+Descargá los map packs oficiales de Blizzard o de [AI Arena](https://aiarena.net/wiki/maps/).
 
-```text
-/Applications/StarCraft II/Maps/
-```
+Usá el helper según tu sistema:
 
-También puedes usar el helper:
-
+**macOS:**
 ```bash
 ./scripts/setup_maps.sh
 ```
+
+**Windows 11:**
+```batch
+scripts\setup_maps.bat
+```
+
+Los mapas se instalan automáticamente en el directorio de StarCraft II de tu sistema.
 
 ### Ejecutar
 
@@ -43,7 +50,7 @@ También puedes usar el helper:
 uv run python scripts/run.py
 ```
 
-El bot juega Protoss contra la IA integrada de Blizzard (Terran, dificultad Media) en modo acelerado.
+El script detecta automáticamente si estás en macOS o Windows y configura los paths correctos. El bot juega Protoss contra la IA integrada de Blizzard (Terran, dificultad Media) en modo acelerado.
 
 ### Estructura
 
@@ -56,7 +63,9 @@ docs/
 ├── bitacora/     # Diario del proyecto (ES)
 └── setup.md      # Guía de instalación detallada
 scripts/
-└── run.py        # Script de lanzamiento
+├── run.py        # Script de lanzamiento (cross-platform)
+├── setup_maps.sh # Instalador de mapas (macOS)
+└── setup_maps.bat# Instalador de mapas (Windows)
 ```
 
 ### Hoja de ruta
@@ -82,10 +91,11 @@ The bot plays **Protoss** with a macro style: expand, produce probes and army, a
 
 ### Requirements
 
-- **StarCraft II** installed on macOS: `/Applications/StarCraft II/`
+- **StarCraft II** installed (the free Starter Edition works):
+  - macOS: `/Applications/StarCraft II/`
+  - Windows 11: `C:\Program Files (x86)\StarCraft II\`
 - **Python 3.9+** tested with 3.13
 - **uv** for dependency management
-- **Ladder maps** downloaded into `/Applications/StarCraft II/Maps/`
 
 ### Setup
 
@@ -95,19 +105,25 @@ cd sc2ai
 uv sync
 ```
 
+`uv sync` installs dependencies and sets up the project in editable mode — no extra steps needed.
+
 ### Maps
 
-Download Blizzard's official map packs or maps from [AI Arena](https://aiarena.net/wiki/maps/) and extract them into:
+Download Blizzard's official map packs or maps from [AI Arena](https://aiarena.net/wiki/maps/).
 
-```text
-/Applications/StarCraft II/Maps/
-```
+Use the helper for your system:
 
-You can also use the helper:
-
+**macOS:**
 ```bash
 ./scripts/setup_maps.sh
 ```
+
+**Windows 11:**
+```batch
+scripts\setup_maps.bat
+```
+
+Maps are installed automatically in your system's StarCraft II directory.
 
 ### Run
 
@@ -115,7 +131,7 @@ You can also use the helper:
 uv run python scripts/run.py
 ```
 
-The bot plays Protoss against Blizzard's built-in AI (Terran, Medium difficulty) in accelerated mode.
+The script auto-detects whether you're on macOS or Windows and configures the correct paths. The bot plays Protoss against Blizzard's built-in AI (Terran, Medium difficulty) in accelerated mode.
 
 ### Structure
 
@@ -128,7 +144,9 @@ docs/
 ├── bitacora/     # Project journal (ES)
 └── setup.md      # Detailed setup guide
 scripts/
-└── run.py        # Launch script
+├── run.py        # Launch script (cross-platform)
+├── setup_maps.sh # Map installer (macOS)
+└── setup_maps.bat# Map installer (Windows)
 ```
 
 ### Roadmap
