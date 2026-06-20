@@ -78,5 +78,11 @@ def test_extract_features_returns_required_keys_with_empty_defaults():
     assert features["enemy_army_composition"] == {}
     assert features["our_army_composition"] == {}
     assert features["our_structures"] == {}
+    assert features["our_army_value"] == 0
+    assert features["enemy_army_value"] == 0
+    assert features["army_value_ratio"] == 0.0
+    assert features["enemy_t3_count"] == 0
+    assert features["our_t3_count"] == 0
+    assert features["enemy_worker_count"] == 0
     assert isinstance(features["bases"], list)
     assert len(features["bases"]) == 1

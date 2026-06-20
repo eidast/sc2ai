@@ -56,6 +56,13 @@ def detect_events(
             details={"minerals": features["minerals"], "vespene": features["vespene"]},
         ))
 
+    if _detect_gas_starved(features, bot):
+        events.append(Event(
+            type="gas_starved", time=now, step=iteration,
+            severity="high",
+            details={"minerals": features["minerals"], "vespene": features["vespene"]},
+        ))
+
     if _detect_tech_milestone(features, bot):
         events.append(Event(
             type="tech_milestone", time=now, step=iteration,
@@ -156,7 +163,9 @@ def _detect_worker_stalled(features: dict, bot: Any) -> bool:
 
 
 def _detect_resource_float(features: dict, bot: Any) -> bool:
-    if features.get("minerals", 0) <= 500:
+    minerals = features.get("minerals", 0)
+    vespene = features.get("vespene", 0)
+    if minerals <= 300 and vespene <= 300:
         return False
     from sc2.ids.unit_typeid import UnitTypeId
     gateways = bot.structures(UnitTypeId.GATEWAY)
@@ -165,6 +174,26 @@ def _detect_resource_float(features: dict, bot: Any) -> bool:
     return all_gates.amount == 0 or all(
         g.is_idle for g in all_gates
     )
+
+
+def _detect_gas_starved(features: dict, bot: Any) -> bool:
+    minerals = features.get("minerals", 0)
+    vespene = features.get("vespene", 0)
+    if minerals < 300:
+        return False
+    if vespene > 100:
+        return False
+    if minerals / max(vespene, 1) < 3:
+        return False
+    gas_buildings = getattr(bot, "gas_buildings", None)
+    if gas_buildings is None:
+        return False
+    if gas_buildings.amount == 0:
+        return True
+    total_workers_on_gas = sum(
+        getattr(a, "assigned_harvesters", 0) for a in gas_buildings
+    )
+    return total_workers_on_gas < gas_buildings.amount * 3
 
 
 def _detect_tech_milestone(features: dict, bot: Any) -> bool:

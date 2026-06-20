@@ -82,17 +82,25 @@ def main():
         "--map", default=DEFAULT_MAP,
         help=f"Map name or 'random' (default: {DEFAULT_MAP})",
     )
+    parser.add_argument(
+        "--surrender", action="store_true",
+        help="Enable strategic surrender when victory is mathematically impossible",
+    )
+    parser.add_argument(
+        "--fog", action="store_true",
+        help="Enable fog of war (default: disabled for full visibility)",
+    )
 
     args = parser.parse_args()
 
     run_game(
         resolve_map(args.map),
         [
-            Bot(Race.Protoss, MyBot(), fullscreen=True),
+            Bot(Race.Protoss, MyBot(surrender_enabled=args.surrender, fog_enabled=args.fog), fullscreen=True),
             Computer(Race.Terran, Difficulty.Medium),
         ],
         realtime=args.realtime,
-        disable_fog=True,
+        disable_fog=not args.fog,
     )
 
 

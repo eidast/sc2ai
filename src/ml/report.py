@@ -2,6 +2,8 @@ import json
 import os
 from datetime import datetime
 
+from src.data.icons import render_unit_icon_svg
+
 
 def _load_jsonl(path: str) -> list[dict]:
     rows = []
@@ -175,6 +177,10 @@ def _sparkline(values: list[float], width: int = 40, max_val: float | None = Non
     return "".join(result)
 
 
+def _render_unit_icon(unit_name: str, size: int = 24) -> str:
+    return render_unit_icon_svg(unit_name, size)
+
+
 def generate_report_html(report: dict) -> str:
     r = report
     m = r["metrics"]
@@ -198,7 +204,11 @@ def generate_report_html(report: dict) -> str:
     our_rows = ""
     for s in snaps:
         our_comp = s.get("our_composition", {})
-        our_str = ", ".join(f"{k}: {v}" for k, v in our_comp.items()) if our_comp else "none"
+        our_parts = []
+        for k, v in our_comp.items():
+            icon = _render_unit_icon(k, 20)
+            our_parts.append(f'{icon} {k}: {v}')
+        our_str = " ".join(our_parts) if our_parts else "none"
         our_rows += (
             f'<tr><td>{s["time"]}s</td>'
             f'<td>{s["our_army_count"]}</td>'
@@ -208,7 +218,11 @@ def generate_report_html(report: dict) -> str:
     enemy_rows = ""
     for s in snaps:
         enemy_comp = s.get("enemy_composition", {})
-        enemy_str = ", ".join(f"{k}: {v}" for k, v in enemy_comp.items()) if enemy_comp else "none"
+        enemy_parts = []
+        for k, v in enemy_comp.items():
+            icon = _render_unit_icon(k, 20)
+            enemy_parts.append(f'{icon} {k}: {v}')
+        enemy_str = " ".join(enemy_parts) if enemy_parts else "none"
         enemy_rows += (
             f'<tr><td>{s["time"]}s</td>'
             f'<td>{s["enemy_visible"]}</td>'
