@@ -57,6 +57,7 @@ def test_extract_features_returns_required_keys_with_empty_defaults():
         units=UnitCollection(0),
         structures=UnitCollection(0),
         enemy_units=UnitCollection(0),
+        enemy_structures=UnitCollection(0),
         mineral_field=UnitCollection(0),
         gas_buildings=UnitCollection(0),
         time=1.5,
@@ -73,6 +74,7 @@ def test_extract_features_returns_required_keys_with_empty_defaults():
     assert features["worker_count"] == 0
     assert features["army_count"] == 0
     assert features["enemy_visible_units"] == 0
+    assert features["enemy_visible_structures"] == 0
     assert features["game_time_seconds"] == 1.5
     assert features["expansion_count"] == 1
     assert features["enemy_army_composition"] == {}

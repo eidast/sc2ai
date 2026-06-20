@@ -15,6 +15,7 @@ def _features(**overrides):
         "our_t3_count": 0,
         "enemy_t3_count": 0,
         "worker_count": 12,
+        "enemy_visible_structures": 0,
     }
     base.update(overrides)
     return base
@@ -222,6 +223,12 @@ class TestDecisionFSM:
         result = _eval(DecisionState.DEFEND, _features(
             game_time_seconds=300, army_count=10,
         ), enemy_gone_sustained=30.0)
+        assert result.state != DecisionState.WON
+
+    def test_victory_not_detected_when_enemy_structures_remain(self):
+        result = _eval(DecisionState.DEFEND, _features(
+            game_time_seconds=300, army_count=10, enemy_visible_structures=3,
+        ), enemy_gone_sustained=70.0)
         assert result.state != DecisionState.WON
 
     def test_victory_has_priority_over_surrender(self):

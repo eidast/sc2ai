@@ -61,6 +61,29 @@ The system SHALL configure the game to play against Blizzard's built-in Computer
 - **WHEN** the game is configured with `Computer(Race.Terran, Difficulty.Medium)` as opponent
 - **THEN** the built-in AI SHALL control the opposing player and the match SHALL play to completion
 
+### Requirement: Bot aggressively cleans up remaining enemy structures
+The system SHALL make `manage_attack()` actively search for and destroy remaining enemy structures while the decision engine is in `ATTACK`.
+
+#### Scenario: Visible enemy structure is prioritized
+- **WHEN** the decision state is `ATTACK`, army units exist, and at least one enemy structure is visible
+- **THEN** idle army units SHALL attack the closest visible enemy structure instead of a generic map waypoint
+
+#### Scenario: Cleanup sweeps known map locations
+- **WHEN** the decision state is `ATTACK`, army units exist, and no enemy structures are visible
+- **THEN** idle army units SHALL attack a cleanup waypoint selected from the enemy starting location and known expansion locations
+
+#### Scenario: Cleanup advances after reaching waypoint
+- **WHEN** the attacking army is close to the current cleanup waypoint
+- **THEN** the bot SHALL advance to the next cleanup waypoint for subsequent attack orders
+
+#### Scenario: Macro continues during cleanup
+- **WHEN** cleanup attack orders are being issued in `ATTACK`
+- **THEN** the bot SHALL continue running the existing macro managers before `manage_attack()` in `on_step()`
+
+#### Scenario: Cleanup does not alter victory result semantics
+- **WHEN** cleanup attack behavior is active
+- **THEN** the bot SHALL still accept victory only from SC2 `player_result` or the existing sustained no-enemy-visible heuristic
+
 ### Requirement: Games run at accelerated speed for testing
 The system SHALL support running games in non-realtime mode (`realtime=False`) so matches complete quickly during development. The system SHALL also support running games in realtime mode (`realtime=True`) via the `--realtime` CLI flag.
 

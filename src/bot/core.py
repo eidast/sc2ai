@@ -55,6 +55,7 @@ class MyBot(BotAI):
         self._scout_state = ScoutState.IDLE
         self._last_enemy_analysis: dict = {}
         self._last_recommended_counters: dict = {}
+        self._cleanup_target_index = 0
 
     async def on_start(self):
         self._decision_state = DecisionState.DEFEND
@@ -62,6 +63,7 @@ class MyBot(BotAI):
         self._surrender_conditions_start = None
         self._enemy_gone_start = None
         self._surrender_fired = False
+        self._cleanup_target_index = 0
         self.logger.info("Bot started — race: %s, map: %s", self.race, self.game_info.map_name)
 
     async def on_step(self, iteration: int):
@@ -126,7 +128,7 @@ class MyBot(BotAI):
             else:
                 self._surrender_conditions_start = None
 
-        enemy_visible = features.get("enemy_visible_units", 0)
+        enemy_visible = features.get("enemy_visible_units", 0) + features.get("enemy_visible_structures", 0)
         if enemy_visible == 0 and features.get("game_time_seconds", 0) >= VICTORY_MIN_TIME:
             if self._enemy_gone_start is None:
                 self._enemy_gone_start = self.time
@@ -158,6 +160,8 @@ class MyBot(BotAI):
             self._state_start_time = self.time
             self._surrender_conditions_start = None
             self._enemy_gone_start = None
+            if self._decision_state != DecisionState.ATTACK:
+                self._cleanup_target_index = 0
 
         if self._decision_state == DecisionState.WON and not self._surrender_fired:
             self._surrender_fired = True
@@ -503,8 +507,48 @@ class MyBot(BotAI):
         if army.amount == 0:
             return
 
+        if self.enemy_structures.amount > 0:
+            for unit in army.idle:
+                target = self.enemy_structures.closest_to(unit.position)
+                unit.attack(target.position)
+            return
+
+        target = self._select_cleanup_target(army)
+        if target is None:
+            return
+
         for unit in army.idle:
-            unit.attack(self.enemy_start_locations[0])
+            unit.attack(target)
+
+    def _get_cleanup_targets(self) -> list[Point2]:
+        targets = []
+        for location in self.enemy_start_locations:
+            targets.append(Point2(location))
+
+        try:
+            expansion_locations = self.expansion_locations_list
+        except (AssertionError, AttributeError):
+            expansion_locations = getattr(self, "_expansion_positions_list", [])
+
+        for location in expansion_locations:
+            point = Point2(location)
+            if point not in targets:
+                targets.append(point)
+
+        return targets
+
+    def _select_cleanup_target(self, army: Units) -> Point2 | None:
+        targets = self._get_cleanup_targets()
+        if not targets:
+            return None
+
+        self._cleanup_target_index %= len(targets)
+        target = targets[self._cleanup_target_index]
+        closest = army.closest_to(target)
+        if closest and closest.position.distance_to(target) <= 8:
+            self._cleanup_target_index = (self._cleanup_target_index + 1) % len(targets)
+            target = targets[self._cleanup_target_index]
+        return target
 
     async def manage_defense(self):
         if self._decision_state == DecisionState.ATTACK:

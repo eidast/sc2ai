@@ -152,6 +152,7 @@ def extract_features(bot: BotAI) -> dict:
         if bot.workers
         else 0,
         "enemy_visible_units": len(bot.enemy_units),
+        "enemy_visible_structures": len(bot.enemy_structures),
         "enemy_worker_count": enemy_worker_count,
         "enemy_army_composition": enemy_composition,
         "enemy_army_analysis": _enrich_enemy_army(enemy_composition),

@@ -101,6 +101,7 @@ def evaluate_decision(
     our_t3_count = features.get("our_t3_count", 0)
     enemy_t3_count = features.get("enemy_t3_count", 0)
     worker_count = features.get("worker_count", 0)
+    enemy_visible_structures = features.get("enemy_visible_structures", 0)
 
     if current_state == DecisionState.SURRENDER:
         return Decision(DecisionState.SURRENDER, "already surrendered")
@@ -108,7 +109,7 @@ def evaluate_decision(
     if current_state == DecisionState.WON:
         return Decision(DecisionState.WON, "already won")
 
-    if game_time >= VICTORY_MIN_TIME and army_count >= VICTORY_MIN_ARMY:
+    if game_time >= VICTORY_MIN_TIME and army_count >= VICTORY_MIN_ARMY and enemy_visible_structures == 0:
         if enemy_gone_sustained >= VICTORY_ENEMY_GONE_SECONDS:
             return Decision(DecisionState.WON, "enemy eliminated — victory")
 
