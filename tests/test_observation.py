@@ -17,6 +17,34 @@ class UnitCollection:
     def exclude_type(self, _unit_types):
         return self
 
+    def __iter__(self):
+        return iter([])
+
+    def __len__(self):
+        return self.amount
+
+    def closer_than(self, _distance, _position):
+        return self
+
+
+class MockNexus:
+    def __init__(self):
+        self.position = SimpleNamespace(x=50.0, y=50.0)
+        self.assigned_harvesters = 12
+
+
+class TownhallCollection:
+    def __init__(self, amount):
+        self.amount = amount
+        self.ready = self
+        self._nexuses = [MockNexus() for _ in range(amount)]
+
+    def __iter__(self):
+        return iter(self._nexuses)
+
+    def __len__(self):
+        return len(self._nexuses)
+
 
 def test_extract_features_returns_required_keys_with_empty_defaults():
     bot = SimpleNamespace(
@@ -27,9 +55,12 @@ def test_extract_features_returns_required_keys_with_empty_defaults():
         supply_left=3,
         workers=EmptyUnits(),
         units=UnitCollection(0),
-        enemy_units=[],
+        structures=UnitCollection(0),
+        enemy_units=UnitCollection(0),
+        mineral_field=UnitCollection(0),
+        gas_buildings=UnitCollection(0),
         time=1.5,
-        townhalls=UnitCollection(1),
+        townhalls=TownhallCollection(1),
         state=SimpleNamespace(game_loop=33),
     )
 
@@ -44,3 +75,8 @@ def test_extract_features_returns_required_keys_with_empty_defaults():
     assert features["enemy_visible_units"] == 0
     assert features["game_time_seconds"] == 1.5
     assert features["expansion_count"] == 1
+    assert features["enemy_army_composition"] == {}
+    assert features["our_army_composition"] == {}
+    assert features["our_structures"] == {}
+    assert isinstance(features["bases"], list)
+    assert len(features["bases"]) == 1

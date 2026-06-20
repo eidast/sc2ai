@@ -8,18 +8,17 @@ class BuildPhase(Enum):
     MAXED = auto()
 
 
-PROBE_LIMIT = 70
-SUPPLY_HEADROOM = 4
-EXPAND_SUPPLY = 20
-GATEWAY_COUNT_ONE_BASE = 1
-GATEWAY_COUNT_TWO_BASE = 4
-ATTACK_SUPPLY = 200
+class CameraMode(Enum):
+    SCOUT = auto()
+    EXPAND = auto()
+    DEFEND = auto()
+    ARMY = auto()
+    ENGAGE = auto()
 
-BUILD_PRIORITY = [
-    "pylon",
-    "gateway",
-    "cybernetics_core",
-    "warp_gate_research",
-    "expansion",
-    "gateways_extra",
-]
+
+WORKERS_PER_MINERAL = 2
+WORKERS_PER_GAS = 3
+MAX_SATURATION_RATIO = 0.9
+THREAT_RANGE = 15
+ENGAGE_RANGE = 8
+BASE_MINERAL_RADIUS = 10

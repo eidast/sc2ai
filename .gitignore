@@ -12,6 +12,10 @@ venv/
 # Project data
 maps/
 replays/
+reports/
+
+# Secrets
+.env
 
 
 # IDE

@@ -1,19 +1,4 @@
-## ADDED Requirements
-
-### Requirement: Script de lanzamiento detecta el sistema operativo
-El sistema SHALL incluir un script `scripts/run.py` que detecta automáticamente el sistema operativo usando `platform.system()` y configura los paths de StarCraft II y directorio de mapas en función del SO detectado.
-
-#### Scenario: Ejecución en macOS
-- **WHEN** el script se ejecuta en macOS (Darwin)
-- **THEN** `SC2_DIR` SHALL ser `/Applications/StarCraft II` y `MAPS_DIR` SHALL ser `/Applications/StarCraft II/Maps`
-
-#### Scenario: Ejecución en Windows 11
-- **WHEN** el script se ejecuta en Windows
-- **THEN** `SC2_DIR` SHALL ser `C:\Program Files (x86)\StarCraft II` y `MAPS_DIR` SHALL ser `C:\Program Files (x86)\StarCraft II\Maps`
-
-#### Scenario: Sistema operativo no soportado
-- **WHEN** el script se ejecuta en un SO que no es Darwin ni Windows
-- **THEN** el script SHALL lanzar `RuntimeError` con un mensaje descriptivo indicando el SO detectado
+## MODIFIED Requirements
 
 ### Requirement: Script de lanzamiento usa los paths detectados para resolver el mapa
 El script `scripts/run.py` SHALL usar el `MAPS_DIR` determinado por SO al invocar `sc2.main.run_game` con el mapa configurado. El mapa SHALL ser configurable mediante el argumento CLI `--map`, aceptando un nombre de mapa específico o el valor `random` para selección aleatoria.
@@ -33,6 +18,8 @@ El script `scripts/run.py` SHALL usar el `MAPS_DIR` determinado por SO al invoca
 #### Scenario: Mapa por defecto es AcropolisLE
 - **WHEN** el script se ejecuta sin el argumento `--map`
 - **THEN** el mapa `AcropolisLE` SHALL ser usado como default
+
+## ADDED Requirements
 
 ### Requirement: Script de lanzamiento acepta --realtime
 El script `scripts/run.py` SHALL aceptar un flag `--realtime` que, cuando está presente, configura `run_game(realtime=True)` para ejecutar la partida a velocidad normal con renderizado habilitado.
