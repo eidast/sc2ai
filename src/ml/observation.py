@@ -183,13 +183,54 @@ def extract_features(bot: BotAI) -> dict:
 def _extract_base_features(bot: BotAI) -> list[dict]:
     from src.bot.strategy import THREAT_RANGE, BASE_MINERAL_RADIUS
 
+    idle_workers = bot.workers.idle
+    ready_gas = bot.gas_buildings.ready
+
+    def _nearest_nexus(unit):
+        best_dist = float("inf")
+        best = None
+        for nexus in bot.townhalls:
+            d = unit.position.distance_to(nexus.position)
+            if d < best_dist:
+                best_dist = d
+                best = nexus
+        return best, best_dist
+
+    idle_by_base: dict[int, int] = {}
+    for w in idle_workers:
+        nearest, _ = _nearest_nexus(w)
+        if nearest:
+            idle_by_base[nearest.tag] = idle_by_base.get(nearest.tag, 0) + 1
+
     bases = []
     for nexus in bot.townhalls:
         minerals_nearby = bot.mineral_field.closer_than(BASE_MINERAL_RADIUS, nexus.position).amount
-        gas_nearby = bot.gas_buildings.closer_than(BASE_MINERAL_RADIUS, nexus.position).amount
-        ideal_workers = minerals_nearby * 2 + gas_nearby * 3
+        gas_buildings_nearby = ready_gas.closer_than(BASE_MINERAL_RADIUS, nexus.position)
+        gas_geysers = gas_buildings_nearby.amount
+
+        ideal_mineral_workers = min(minerals_nearby * 2, 16)
+        ideal_gas_workers = gas_geysers * 3
+        ideal_workers = ideal_mineral_workers + ideal_gas_workers
+
         current_workers = getattr(nexus, "assigned_harvesters", 0)
-        saturation_ratio = current_workers / ideal_workers if ideal_workers > 0 else 1.0
+
+        actual_gas_workers = sum(
+            getattr(g, "assigned_harvesters", 0) for g in gas_buildings_nearby
+        )
+        actual_mineral_workers = max(0, current_workers - actual_gas_workers)
+
+        idle_nearby = idle_by_base.get(nexus.tag, 0)
+
+        mineral_saturation = actual_mineral_workers / ideal_mineral_workers if ideal_mineral_workers > 0 else 1.0
+        gas_saturation = actual_gas_workers / ideal_gas_workers if ideal_gas_workers > 0 else 1.0
+        total_saturation = current_workers / ideal_workers if ideal_workers > 0 else 1.0
+
+        if mineral_saturation > 1.1 or (gas_saturation > 1.0 and gas_geysers > 0):
+            status = "oversaturated"
+        elif mineral_saturation < 0.7 or (gas_saturation < 0.5 and gas_geysers > 0):
+            status = "undersaturated"
+        else:
+            status = "optimal"
 
         army_units = bot.units.exclude_type(_NON_COMBAT_TYPES)
         army_nearby = army_units.closer_than(THREAT_RANGE, nexus.position).amount
@@ -199,9 +240,20 @@ def _extract_base_features(bot: BotAI) -> list[dict]:
             "position": (nexus.position.x, nexus.position.y),
             "ideal_workers": ideal_workers,
             "current_workers": current_workers,
-            "saturation_ratio": round(saturation_ratio, 3),
+            "saturation_ratio": round(total_saturation, 3),
             "army_nearby": army_nearby,
             "enemy_nearby": enemy_nearby,
+            "mineral_patches": minerals_nearby,
+            "gas_geysers": gas_geysers,
+            "ideal_mineral_workers": ideal_mineral_workers,
+            "ideal_gas_workers": ideal_gas_workers,
+            "actual_mineral_workers": actual_mineral_workers,
+            "actual_gas_workers": actual_gas_workers,
+            "idle_workers_nearby": idle_nearby,
+            "mineral_saturation": round(mineral_saturation, 3),
+            "gas_saturation": round(gas_saturation, 3),
+            "total_saturation": round(total_saturation, 3),
+            "status": status,
         })
 
     return bases

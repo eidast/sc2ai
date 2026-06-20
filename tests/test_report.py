@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from src.ml.report import generate_report_json, generate_report_md, generate_report_html
+from src.ml.report import generate_report_json, generate_report_md, generate_report_html, _build_saturation_snapshots
 
 
 def test_generate_report_json_shape():
@@ -147,3 +147,102 @@ def test_generate_report_html_contains_required_elements():
     assert "Minerals gathered" in html
     assert "Timeline" in html
     assert "Events" in html
+
+
+def test_saturation_summary_includes_enriched_fields():
+    features = [
+        {"game_time_seconds": 10, "iteration": 100, "supply_used": 10, "supply_cap": 15,
+         "worker_count": 10, "army_count": 0, "minerals": 200, "vespene": 0,
+         "collected_minerals": 1500, "collected_vespene": 800,
+         "our_army_value": 100, "enemy_army_value": 200, "our_t3_count": 1, "enemy_t3_count": 2,
+         "expansion_count": 1, "enemy_visible_units": 2, "enemy_army_composition": {},
+         "our_army_composition": {}, "bases": [
+             {"ideal_workers": 22, "current_workers": 18, "saturation_ratio": 0.818,
+              "mineral_patches": 8, "gas_geysers": 2,
+              "ideal_mineral_workers": 16, "ideal_gas_workers": 6,
+              "actual_mineral_workers": 14, "actual_gas_workers": 4,
+              "idle_workers_nearby": 0, "mineral_saturation": 0.875,
+              "gas_saturation": 0.667, "total_saturation": 0.818,
+              "status": "undersaturated", "army_nearby": 0, "enemy_nearby": 0,
+              "position": (50.0, 50.0)},
+         ]},
+    ]
+    events = []
+    bot_info = {"map": "TestMap", "opponent_race": "Terran",
+                "opponent_difficulty": "Medium", "result": "defeat"}
+
+    report = generate_report_json("test", features, events, bot_info)
+    sat = report["metrics"]["saturation_summary"]
+    assert len(sat) == 1
+    assert sat[0]["mineral_patches"] == 8
+    assert sat[0]["actual_mineral_workers"] == 14
+    assert sat[0]["actual_gas_workers"] == 4
+    assert sat[0]["mineral_saturation"] == 0.875
+    assert sat[0]["gas_saturation"] == 0.667
+    assert sat[0]["status"] == "undersaturated"
+    assert sat[0]["current"] == 18
+    assert sat[0]["ideal"] == 22
+
+
+def test_saturation_timeline_in_report():
+    features = []
+    for t in range(0, 130, 10):
+        features.append({
+            "game_time_seconds": t, "iteration": t * 10,
+            "supply_used": 10, "supply_cap": 15,
+            "worker_count": 12, "army_count": 0,
+            "minerals": 200, "vespene": 0,
+            "collected_minerals": 1500, "collected_vespene": 800,
+            "our_army_value": 100, "enemy_army_value": 200,
+            "our_t3_count": 0, "enemy_t3_count": 0,
+            "expansion_count": 1, "enemy_visible_units": 0,
+            "enemy_army_composition": {},
+            "our_army_composition": {},
+            "bases": [{
+                "ideal_workers": 16, "current_workers": 12,
+                "saturation_ratio": 0.75,
+                "mineral_patches": 8, "gas_geysers": 0,
+                "ideal_mineral_workers": 16, "ideal_gas_workers": 0,
+                "actual_mineral_workers": 12, "actual_gas_workers": 0,
+                "idle_workers_nearby": 0,
+                "mineral_saturation": 0.75, "gas_saturation": 1.0,
+                "total_saturation": 0.75, "status": "undersaturated",
+                "army_nearby": 0, "enemy_nearby": 0,
+                "position": (50.0, 50.0),
+            }],
+        })
+
+    events = []
+    bot_info = {"map": "TestMap", "opponent_race": "Terran",
+                "opponent_difficulty": "Medium", "result": "defeat"}
+
+    report = generate_report_json("test", features, events, bot_info)
+    assert "saturation_timeline" in report
+    timeline = report["saturation_timeline"]
+    assert len(timeline) >= 2
+    snap = timeline[0]
+    assert "time" in snap
+    assert "bases" in snap
+    assert "totals" in snap
+    assert snap["totals"]["bases"] == 1
+    assert snap["totals"]["workers"] == 12
+
+
+def test_build_saturation_snapshots():
+    features = []
+    for t in range(0, 200, 10):
+        features.append({
+            "game_time_seconds": t, "worker_count": 12 + t // 10,
+            "bases": [{
+                "actual_mineral_workers": 12, "actual_gas_workers": 0,
+                "mineral_saturation": 0.75, "gas_saturation": 1.0,
+                "status": "undersaturated", "idle_workers_nearby": 0,
+            }],
+        })
+
+    snapshots = _build_saturation_snapshots(features, interval_seconds=60)
+    assert len(snapshots) >= 3
+    assert snapshots[0]["time"] >= 0
+    assert snapshots[0]["bases"][0]["mineral_workers"] == 12
+    assert snapshots[0]["totals"]["undersaturated_bases"] == 1
+    assert snapshots[0]["totals"]["oversaturated_bases"] == 0

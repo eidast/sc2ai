@@ -12,11 +12,22 @@ The system SHALL launch a StarCraft II game instance and connect a Protoss bot t
 - **THEN** the system SHALL report an error message containing the missing map name, the expected Maps directory, and the `scripts/setup_maps.sh` helper path
 
 ### Requirement: Bot plays Protoss macro strategy
-The system SHALL execute a Protoss macro playstyle: constant probe production, base expansion, tech progression (including Forge, Twilight Council, and ground upgrades), army production (adaptive based on scouted enemy counters), and attack decisions driven by the strategic decision engine instead of a fixed supply threshold. The bot SHALL detect gameplay events during each step and use them to make the strategy reactive. The bot SHALL use a phase-driven tactical camera to follow units based on game context. The bot SHALL send a scout probe to explore enemy starting locations. The bot SHALL fix gas economy by continuing to the next geyser when an assimilator is unaffordable and assigning workers to undersaturated assimilators. The bot SHALL optionally surrender when the decision engine determines victory is impossible.
+The system SHALL execute a Protoss macro playstyle: constant probe production, base expansion, tech progression (including Forge, Twilight Council, and ground upgrades), army production (adaptive based on scouted enemy counters), and attack decisions driven by the strategic decision engine instead of a fixed supply threshold. The bot SHALL detect gameplay events during each step and use them to make the strategy reactive. The bot SHALL use a phase-driven tactical camera to follow units based on game context. The bot SHALL send a scout probe to explore enemy starting locations. The bot SHALL fix gas economy by continuing to the next geyser when an assimilator is unaffordable and assigning workers to undersaturated assimilators. The bot SHALL optionally surrender when the decision engine determines victory is impossible. During the first ~90 seconds of game time, the bot SHALL follow a deterministic build order via `manage_early_game()` to guarantee production infrastructure (Pylon → Gateway → Cybernetics Core → Warp Gate) before yielding control to the strategy engine.
 
-#### Scenario: Constant worker production
-- **WHEN** the bot has fewer than 70 probes and available supply
-- **THEN** the bot SHALL prioritize probe training at the nexus with the lowest saturation ratio. A nexus SHALL be skipped if its saturation ratio is ≥ 0.9.
+### Requirement: Constant worker production
+The system SHALL train probes at the least saturated nexus when `undersaturated_bases > 0`, worker count is below the dynamic max (min(70, sum of ideal_workers × 1.1) when game_time > 900, else 70), and supply and minerals are available. A nexus SHALL be skipped if its status is not "undersaturated". The system SHALL NOT train probes when all bases are "optimal" or "oversaturated", regardless of total worker count.
+
+#### Scenario: Probe trained at undersaturated base
+- **WHEN** base 1 is "optimal" (mineral_sat 0.95) and base 2 is "undersaturated" (mineral_sat 0.4), and all conditions met
+- **THEN** a probe SHALL be trained at base 2
+
+#### Scenario: No probe trained when all bases saturated
+- **WHEN** the bot has 40 workers, 2 bases, both with status "optimal", and supply and minerals are available
+- **THEN** no probe SHALL be trained
+
+#### Scenario: Probe trained respects dynamic max in late game
+- **WHEN** game_time > 900, dynamic_max is 41, and current workers is 40
+- **THEN** the effective max worker limit SHALL be 41 and probe training SHALL respect it
 
 #### Scenario: Supply management
 - **WHEN** available supply drops below 4
@@ -32,7 +43,19 @@ The system SHALL execute a Protoss macro playstyle: constant probe production, b
 
 #### Scenario: Tech progression
 - **WHEN** the bot has a completed Gateway
-- **THEN** the bot SHALL build a Cybernetics Core, then research Warp Gate, and add additional Gateways
+- **THEN** the bot SHALL build a Cybernetics Core, then research Warp Gate, and add additional Gateways. The bot SHALL NOT build Forge, Twilight Council, Robotics Facility, or Stargate before a Gateway exists.
+
+#### Scenario: Formula-driven tech requires production prerequisites
+- **WHEN** the strategy engine evaluates priority formulas for structures
+- **THEN** the formulas for Forge, Twilight Council, Robotics Facility, and Stargate SHALL include `has_structure('GATEWAY')` or `has_structure('CYBERNETICSCORE')` as a multiplication factor so their score is zero when the prerequisite structure is missing
+
+#### Scenario: Natural expansion
+- **WHEN** ALL current nexuses have saturation ratio ≥ 0.9 AND the bot can afford a Nexus AND no Nexus is already pending
+- **THEN** the bot SHALL send a probe to build a Nexus at the next expansion location. There SHALL be no hard limit on the number of expansions.
+
+#### Scenario: Expansion triggered by mineral banking
+- **WHEN** minerals exceed 400 AND no Nexus is pending AND no Nexus is already building
+- **THEN** the bot SHALL expand, regardless of base saturation ratio
 
 #### Scenario: Army production
 - **WHEN** the bot has available resources and production capacity
@@ -87,6 +110,25 @@ The system SHALL make `manage_attack()` actively search for and destroy remainin
 #### Scenario: Cleanup does not alter victory result semantics
 - **WHEN** cleanup attack behavior is active
 - **THEN** the bot SHALL still accept victory only from SC2 `player_result` or the existing sustained no-enemy-visible heuristic
+
+### Requirement: Gateway production capacity scales with economy
+The system SHALL dynamically compute the target gateway count based on the number of bases and current mineral float. The target SHALL be capped at 16 gateways.
+
+#### Scenario: One base baseline
+- **WHEN** the bot has 1 base and minerals < 500
+- **THEN** the target gateway count SHALL be 4
+
+#### Scenario: Scales with bases
+- **WHEN** the bot has 2 bases and minerals < 500
+- **THEN** the target gateway count SHALL be 7
+
+#### Scenario: Extra gateways when floating
+- **WHEN** the bot has 2 bases and minerals > 500
+- **THEN** the target gateway count SHALL increase by 2
+
+#### Scenario: Respects maximum cap
+- **WHEN** the computed target exceeds 16
+- **THEN** the target SHALL be capped at 16
 
 ### Requirement: Games run at accelerated speed for testing
 The system SHALL support running games in non-realtime mode (`realtime=False`) so matches complete quickly during development. The system SHALL also support running games in realtime mode (`realtime=True`) via the `--realtime` CLI flag.
@@ -192,3 +234,14 @@ The system SHALL add `--surrender` and `--fog` flags to `scripts/run.py`.
 #### Scenario: No flags preserves current behavior
 - **WHEN** `python scripts/run.py` is executed with no new flags
 - **THEN** the bot SHALL start with `surrender_enabled=False, fog_enabled=False` and `disable_fog=True`
+
+### Requirement: Worker transfer manager runs autonomously
+The system SHALL execute `manage_worker_transfer()` on every `on_step` as part of the `manage_probes()` flow. The manager SHALL: (1) reassign idle or excess mineral workers to undersaturated gas geysers, (2) transfer workers from oversaturated bases to undersaturated bases, and (3) in late game (game_time > 900, all bases oversaturated), suppress further probe production by setting the effective max workers to the dynamic cap.
+
+#### Scenario: manage_worker_transfer runs after probe training
+- **WHEN** `on_step` is called
+- **THEN** `manage_worker_transfer()` SHALL execute within `manage_probes()`, after the probe training logic but before the method returns
+
+#### Scenario: Worker transfer does not interfere with other managers
+- **WHEN** `manage_worker_transfer()` issues a gather order to a worker
+- **THEN** the worker transfer SHALL NOT prevent `manage_tech()`, `manage_upgrades()`, `manage_army()`, or `manage_attack()` from executing normally in the same step

@@ -38,13 +38,16 @@ class MyBot(BotAI):
     MAX_WORKERS = 70
     ATTACK_SUPPLY = 200
 
-    def __init__(self, log_interval: int = 22, surrender_enabled: bool = False, fog_enabled: bool = False, strategy_profile: str | None = None):
+    def __init__(self, log_interval: int = 22, surrender_enabled: bool = False, fog_enabled: bool = False, strategy_profile: str | None = None, opponent_difficulty: str = "Medium", opponent_race: str = "Terran", opponent_count: int = 1):
         super().__init__()
         self.logger = setup_logger()
         self.log_interval = log_interval
         self.surrender_enabled = surrender_enabled
         self.fog_enabled = fog_enabled
         self.strategy_profile_name = strategy_profile
+        self.opponent_difficulty = opponent_difficulty
+        self.opponent_race = opponent_race
+        self.opponent_count = opponent_count
         self._decision_state = DecisionState.DEFEND
         self._state_start_time: float = 0.0
         self._surrender_conditions_start: float | None = None
@@ -63,6 +66,9 @@ class MyBot(BotAI):
         self._last_recommended_counters: dict = {}
         self._cleanup_target_index = 0
         self._scout_metadata = ScoutMetadata(decay_rate=0.05)
+        self._worker_scout_tag: int | None = None
+        self._worker_scout_waypoint_index: int = 0
+        self._worker_scout_active = False
 
         import os as _os
         _data_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))), "src", "data", "strategies")
@@ -71,6 +77,8 @@ class MyBot(BotAI):
         self._bias_calculator: BiasCalculator | None = None
         self._priority_engine: PriorityEngine | None = None
         self._last_action: Action | None = None
+        self._early_game_phase: int = 0
+        self._early_game_phase_start: float = 0.0
 
     async def on_start(self):
         self._decision_state = DecisionState.DEFEND
@@ -80,6 +88,11 @@ class MyBot(BotAI):
         self._surrender_fired = False
         self._cleanup_target_index = 0
         self._scout_metadata.clear()
+        self._worker_scout_tag = None
+        self._worker_scout_waypoint_index = 0
+        self._worker_scout_active = False
+        self._early_game_phase = 0
+        self._early_game_phase_start = 0.0
         self.logger.info("Bot started — race: %s, map: %s", self.race, self.game_info.map_name)
 
     async def on_step(self, iteration: int):
@@ -114,6 +127,7 @@ class MyBot(BotAI):
                 return
 
         features = extract_features(self)
+        self._last_features = features
         self._last_enemy_analysis = features.get("enemy_army_analysis", {})
         self._last_recommended_counters = features.get("recommended_counters", {})
 
@@ -240,6 +254,7 @@ class MyBot(BotAI):
 
         action = self._last_action if self._last_action and self._decision_state not in (DecisionState.SURRENDER, DecisionState.WON) else None
 
+        await self.manage_early_game()
         await self.manage_probes()
         await self.manage_pylons()
         await self.manage_gas()
@@ -269,8 +284,9 @@ class MyBot(BotAI):
             events = _load_jsonl(self._events_file or "")
             bot_info = {
                 "map": getattr(self.game_info, "map_name", "unknown"),
-                "opponent_race": self.enemy_race.name if hasattr(self, "enemy_race") else "unknown",
-                "opponent_difficulty": "Medium",
+                "opponent_race": self.opponent_race,
+                "opponent_difficulty": self.opponent_difficulty,
+                "opponent_count": self.opponent_count,
                 "result": result_name,
             }
             try:
@@ -280,28 +296,169 @@ class MyBot(BotAI):
             except Exception as e:
                 self.logger.error("Failed to generate report: %s", e)
 
+    async def _build_if_able(self, unit_type_id) -> bool:
+        if not self.can_afford(unit_type_id):
+            self.logger.debug("BUILD %s — FAILED: cant afford", unit_type_id.name)
+            return False
+        if self.already_pending(unit_type_id):
+            return False
+        worker = self.workers.idle.first if self.workers.idle.amount > 0 else None
+        if worker is None:
+            self.logger.debug("BUILD %s — FAILED: no worker available", unit_type_id.name)
+            return False
+        position = await self.find_placement(unit_type_id, self.start_location, placement_step=5)
+        if position is None:
+            self.logger.debug("BUILD %s — FAILED: placement failed", unit_type_id.name)
+            return False
+        await self.build(unit_type_id, near=position)
+        self.logger.info("BUILD %s — afford:True placement:True worker:%s", unit_type_id.name, worker.tag)
+        return True
+
+    async def manage_early_game(self):
+        if self.time >= 90:
+            return
+
+        EARLY_PHASE_TIMEOUT = 15.0
+
+        if self._early_game_phase_start == 0.0:
+            self._early_game_phase_start = self.time
+
+        phase_elapsed = self.time - self._early_game_phase_start
+        if phase_elapsed > EARLY_PHASE_TIMEOUT:
+            self.logger.warning("EARLY GAME — phase %d TIMEOUT after %.1fs, skipping", self._early_game_phase, phase_elapsed)
+            self._early_game_phase += 1
+            self._early_game_phase_start = self.time
+
+        if self._early_game_phase == 0:
+            if self.supply_left < 4 and self.structures(UnitTypeId.PYLON).amount < 1:
+                if not self.already_pending(UnitTypeId.PYLON):
+                    await self._build_if_able(UnitTypeId.PYLON)
+                return
+            self._early_game_phase = 1
+            self._early_game_phase_start = self.time
+
+        if self._early_game_phase == 1:
+            if self.structures(UnitTypeId.GATEWAY).amount == 0:
+                if await self._build_if_able(UnitTypeId.GATEWAY):
+                    return
+                if self.already_pending(UnitTypeId.GATEWAY):
+                    return
+            self._early_game_phase = 2
+            self._early_game_phase_start = self.time
+
+        if self._early_game_phase == 2:
+            if self.structures(UnitTypeId.CYBERNETICSCORE).amount == 0:
+                if await self._build_if_able(UnitTypeId.CYBERNETICSCORE):
+                    return
+                if self.already_pending(UnitTypeId.CYBERNETICSCORE):
+                    return
+            self._early_game_phase = 3
+            self._early_game_phase_start = self.time
+
+        if self._early_game_phase == 3:
+            cyber_cores = self.structures(UnitTypeId.CYBERNETICSCORE).ready
+            if cyber_cores.amount > 0 and not self.already_pending_upgrade(UpgradeId.WARPGATERESEARCH):
+                if self.can_afford(UpgradeId.WARPGATERESEARCH):
+                    cyber_cores.first.research(UpgradeId.WARPGATERESEARCH)
+                    self._early_game_phase = 4
+
     async def manage_probes(self):
         nexus_list = self.townhalls.ready
         if not nexus_list:
             return
 
-        if self.workers.amount >= self.MAX_WORKERS:
+        features = getattr(self, "_last_features", {})
+        bases = features.get("bases", []) if features else []
+        undersaturated = [b for b in bases if b.get("status") == "undersaturated"]
+        oversaturated = [b for b in bases if b.get("status") == "oversaturated"]
+
+        effective_max = self._compute_dynamic_max_workers(bases)
+
+        if self.workers.amount >= effective_max:
+            undersaturated = []
+
+        if self.supply_left >= 1 and self.can_afford(UnitTypeId.PROBE) and undersaturated:
+            sorted_undersat = sorted(undersaturated, key=lambda b: b.get("total_saturation", 0))
+            for b in sorted_undersat:
+                for nexus in self.townhalls.ready:
+                    nx, ny = b.get("position", (0, 0))
+                    if abs(nexus.position.x - nx) < 1 and abs(nexus.position.y - ny) < 1:
+                        if nexus.is_idle:
+                            nexus.train(UnitTypeId.PROBE)
+                            return
+
+        await self.manage_worker_transfer(bases, oversaturated, undersaturated)
+
+    def _compute_dynamic_max_workers(self, bases: list[dict]) -> int:
+        game_time = (
+            getattr(self, "_last_features", {}).get("game_time_seconds", 0)
+            if hasattr(self, "_last_features") else 0
+        )
+        if game_time <= 900:
+            return self.MAX_WORKERS
+        dynamic = int(sum(b.get("ideal_mineral_workers", 0) + b.get("ideal_gas_workers", 0) for b in bases) * 1.1)
+        return min(self.MAX_WORKERS, max(dynamic, 1))
+
+    async def manage_worker_transfer(
+        self,
+        bases: list[dict],
+        oversaturated: list[dict],
+        undersaturated: list[dict],
+    ):
+        if not oversaturated or not undersaturated:
             return
 
-        if self.supply_left < 1:
+        donor_base = oversaturated[0]
+        donor_pos = donor_base.get("position", (0, 0))
+        target_base = undersaturated[0]
+        target_pos = target_base.get("position", (0, 0))
+
+        target_nexus = None
+        for nexus in self.townhalls.ready:
+            if abs(nexus.position.x - target_pos[0]) < 1 and abs(nexus.position.y - target_pos[1]) < 1:
+                target_nexus = nexus
+                break
+        if not target_nexus:
             return
 
-        if not self.can_afford(UnitTypeId.PROBE):
-            return
+        donor_nexus = None
+        for nexus in self.townhalls.ready:
+            if abs(nexus.position.x - donor_pos[0]) < 1 and abs(nexus.position.y - donor_pos[1]) < 1:
+                donor_nexus = nexus
+                break
 
-        sorted_bases = self._sort_bases_by_saturation()
-        for nexus in sorted_bases:
-            ideal, current, ratio = self._get_base_saturation(nexus)
-            if ratio < MAX_SATURATION_RATIO and nexus.is_idle:
-                nexus.train(UnitTypeId.PROBE)
+        idle_nearby = donor_base.get("idle_workers_nearby", 0)
+        excess_mineral = max(0, donor_base.get("actual_mineral_workers", 0) - 16)
+
+        if idle_nearby > 0:
+            for worker in self.workers.idle:
+                minerals = self.mineral_field.closer_than(BASE_MINERAL_RADIUS, target_nexus.position)
+                if minerals:
+                    worker.gather(minerals.first)
                 return
+        elif excess_mineral > 0 and donor_nexus:
+            mineral_workers = [
+                w for w in self.workers.gathering
+                if not any(
+                    g.position.distance_to(w.position) < 3
+                    for g in self.gas_buildings.closer_than(BASE_MINERAL_RADIUS, donor_nexus.position)
+                )
+            ]
+            if mineral_workers:
+                minerals = self.mineral_field.closer_than(BASE_MINERAL_RADIUS, target_nexus.position)
+                if minerals:
+                    mineral_workers[0].gather(minerals.first)
 
     def _get_base_saturation(self, nexus):
+        features = getattr(self, "_last_features", {})
+        bases = features.get("bases", []) if features else []
+        for b in bases:
+            bx, by = b.get("position", (0, 0))
+            if abs(nexus.position.x - bx) < 1 and abs(nexus.position.y - by) < 1:
+                ideal = b.get("ideal_mineral_workers", 0) + b.get("ideal_gas_workers", 0)
+                current = b.get("current_workers", 0)
+                ratio = b.get("total_saturation", 1.0)
+                return ideal, current, ratio
         minerals_nearby = self.mineral_field.closer_than(BASE_MINERAL_RADIUS, nexus.position).amount
         gas_nearby = self.gas_buildings.closer_than(BASE_MINERAL_RADIUS, nexus.position).amount
         ideal = minerals_nearby * 2 + gas_nearby * 3
@@ -312,12 +469,24 @@ class MyBot(BotAI):
         return ideal, current, ratio
 
     def _sort_bases_by_saturation(self):
-        bases = []
+        features = getattr(self, "_last_features", {})
+        bases = features.get("bases", []) if features else []
+        if bases:
+            sorted_bases = sorted(bases, key=lambda b: b.get("total_saturation", 0))
+            result = []
+            for b in sorted_bases:
+                bx, by = b.get("position", (0, 0))
+                for nexus in self.townhalls.ready:
+                    if abs(nexus.position.x - bx) < 1 and abs(nexus.position.y - by) < 1:
+                        result.append(nexus)
+                        break
+            return result
+        fallback = []
         for nexus in self.townhalls.ready:
             _, _, ratio = self._get_base_saturation(nexus)
-            bases.append((nexus, ratio))
-        bases.sort(key=lambda x: x[1])
-        return [b[0] for b in bases]
+            fallback.append((nexus, ratio))
+        fallback.sort(key=lambda x: x[1])
+        return [b[0] for b in fallback]
 
     async def manage_pylons(self):
         if self.supply_left >= 4:
@@ -332,6 +501,10 @@ class MyBot(BotAI):
             await self.build(UnitTypeId.PYLON, near=position)
 
     async def manage_gas(self):
+        if self.structures(UnitTypeId.GATEWAY).amount == 0 and self.gas_buildings.amount >= 1:
+            await self._assign_gas_workers()
+            return
+
         built = False
         for nexus in self.townhalls.ready:
             vespene_geysers = self.vespene_geyser.closer_than(15, nexus.position)
@@ -369,9 +542,14 @@ class MyBot(BotAI):
                     worker.gather(assimilator)
 
     async def manage_expansion(self):
-        if not self.can_afford(UnitTypeId.NEXUS):
-            return
         if self.already_pending(UnitTypeId.NEXUS):
+            return
+
+        if self.minerals > 400 and self.can_afford(UnitTypeId.NEXUS):
+            await self.expand_now(building=UnitTypeId.NEXUS, max_distance=0)
+            return
+
+        if not self.can_afford(UnitTypeId.NEXUS):
             return
 
         for nexus in self.townhalls.ready:
@@ -382,51 +560,42 @@ class MyBot(BotAI):
         await self.expand_now(building=UnitTypeId.NEXUS, max_distance=0)
 
     async def manage_tech(self, action: Action | None = None):
+        if not self.townhalls.ready:
+            return
+
+        if self.structures(UnitTypeId.GATEWAY).amount == 0:
+            if self.time >= 120:
+                self.logger.warning("NO GATEWAY at t=%.1f — emergency build", self.time)
+            await self._build_if_able(UnitTypeId.GATEWAY)
+            return
+
+        if self.structures(UnitTypeId.CYBERNETICSCORE).amount == 0:
+            await self._build_if_able(UnitTypeId.CYBERNETICSCORE)
+            return
+
         if action is not None and action.type == ActionType.BUILD_STRUCTURE:
             target_name = action.target
             if target_name in ("STARGATE", "ROBOTICSFACILITY", "TWILIGHTCOUNCIL", "FORGE"):
                 if hasattr(UnitTypeId, target_name):
                     type_id = getattr(UnitTypeId, target_name)
-                    if self.can_afford(type_id) and not self.already_pending(type_id):
-                        position = await self.find_placement(type_id, self.start_location, placement_step=5)
-                        if position:
-                            await self.build(type_id, near=position)
-                            return
-
-        if not self.townhalls.ready:
-            return
+                    if await self._build_if_able(type_id):
+                        return
 
         cyber_cores = self.structures(UnitTypeId.CYBERNETICSCORE)
+
+        if cyber_cores.ready.amount > 0:
+            if self.can_afford(UpgradeId.WARPGATERESEARCH) and not self.already_pending_upgrade(UpgradeId.WARPGATERESEARCH):
+                cyber_cores.ready.first.research(UpgradeId.WARPGATERESEARCH)
+
         gateways = self.structures(UnitTypeId.GATEWAY)
         target = GATEWAY_MINERAL_BASELINE + max(0, self.townhalls.amount - 1) * GATEWAY_PER_BASE
         if self.minerals > GATEWAY_MINERAL_FLOAT_THRESHOLD:
             target += GATEWAY_MINERAL_FLOAT_EXTRA
         target_gateways = min(target, MAX_GATEWAYS)
 
-        if gateways.amount == 0:
-            if self.can_afford(UnitTypeId.GATEWAY) and not self.already_pending(UnitTypeId.GATEWAY):
-                position = await self.find_placement(UnitTypeId.GATEWAY, self.start_location, placement_step=5)
-                if position:
-                    await self.build(UnitTypeId.GATEWAY, near=position)
-            return
-
-        if cyber_cores.amount == 0 and gateways.ready.amount > 0:
-            if self.can_afford(UnitTypeId.CYBERNETICSCORE) and not self.already_pending(UnitTypeId.CYBERNETICSCORE):
-                position = await self.find_placement(UnitTypeId.CYBERNETICSCORE, self.start_location, placement_step=5)
-                if position:
-                    await self.build(UnitTypeId.CYBERNETICSCORE, near=position)
-            return
-
-        if cyber_cores.ready.amount > 0:
-            warp_gate_ability = self.can_afford(UpgradeId.WARPGATERESEARCH)
-            if warp_gate_ability and not self.already_pending_upgrade(UpgradeId.WARPGATERESEARCH):
-                cyber_cores.ready.first.research(UpgradeId.WARPGATERESEARCH)
-
-        if gateways.amount < target_gateways and self.can_afford(UnitTypeId.GATEWAY):
+        if gateways.amount < target_gateways:
             if not self.already_pending(UnitTypeId.GATEWAY):
-                position = await self.find_placement(UnitTypeId.GATEWAY, self.start_location, placement_step=5)
-                if position:
-                    await self.build(UnitTypeId.GATEWAY, near=position)
+                await self._build_if_able(UnitTypeId.GATEWAY)
 
     async def manage_upgrades(self, action: Action | None = None):
         if action is not None and action.type == ActionType.RESEARCH_UPGRADE:
@@ -535,6 +704,85 @@ class MyBot(BotAI):
         )
         if move_target is not None:
             scout.move(Point2(move_target))
+
+        await self._manage_worker_scout()
+
+    async def _manage_worker_scout(self):
+        features = getattr(self, "_last_features", {})
+        bases = features.get("bases", []) if features else []
+
+        total_idle = sum(b.get("idle_workers_nearby", 0) for b in bases)
+        has_oversaturated = any(b.get("status") == "oversaturated" for b in bases)
+        game_time = self.time
+
+        scout_confidences = [
+            v.get("confidence", 1.0)
+            for v in self._scout_metadata.to_dict().values()
+            if isinstance(v, dict)
+        ]
+        avg_confidence = sum(scout_confidences) / len(scout_confidences) if scout_confidences else 1.0
+
+        if self._worker_scout_active:
+            worker = None
+            if self._worker_scout_tag is not None:
+                worker = self.workers.find_by_tag(self._worker_scout_tag)
+            if worker is None and self._worker_scout_tag is not None:
+                worker = self.units.find_by_tag(self._worker_scout_tag)
+            if worker is None:
+                self._worker_scout_active = False
+                self._worker_scout_tag = None
+                return
+
+            move_target = compute_next_scout_move(
+                worker, self._scout_waypoints, self._worker_scout_waypoint_index
+            )
+            if move_target is not None:
+                worker.move(Point2(move_target))
+            else:
+                minerals = self.mineral_field.closer_than(BASE_MINERAL_RADIUS, worker.position)
+                if minerals:
+                    worker.gather(minerals.first)
+                self._worker_scout_active = False
+                self._worker_scout_tag = None
+            return
+
+        if game_time <= 180:
+            return
+        if avg_confidence >= 0.4:
+            return
+        if not (total_idle > 0 or has_oversaturated):
+            return
+
+        idle_list = self.workers.idle
+        worker = None
+        if idle_list.amount > 0:
+            worker = idle_list.first
+        elif has_oversaturated:
+            for b in bases:
+                if b.get("status") == "oversaturated":
+                    bx, by = b.get("position", (0, 0))
+                    for nexus in self.townhalls.ready:
+                        if abs(nexus.position.x - bx) < 1 and abs(nexus.position.y - by) < 1:
+                            mineral_workers = [
+                                w for w in self.workers.gathering
+                                if not any(
+                                    g.position.distance_to(w.position) < 3
+                                    for g in self.gas_buildings.closer_than(BASE_MINERAL_RADIUS, nexus.position)
+                                )
+                            ]
+                            if mineral_workers:
+                                worker = mineral_workers[0]
+                                break
+                    if worker is not None:
+                        break
+        if worker is None:
+            return
+
+        self._worker_scout_tag = worker.tag
+        self._worker_scout_waypoint_index = 0
+        self._worker_scout_active = True
+        if self._scout_waypoints:
+            worker.move(Point2(self._scout_waypoints[0]))
 
     async def manage_army(self, action: Action | None = None):
         engine_unit: UnitTypeId | None = None

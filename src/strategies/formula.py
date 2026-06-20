@@ -161,6 +161,17 @@ def prepare_builtins(
 
     analysis = features.get("enemy_army_analysis", {}) or {}
 
+    bases_list = features.get("bases", []) or []
+    undersat = sum(1 for b in bases_list if b.get("status") == "undersaturated")
+    oversat = sum(1 for b in bases_list if b.get("status") == "oversaturated")
+    idle = sum(b.get("idle_workers_nearby", 0) for b in bases_list)
+    avg_mineral = (
+        sum(b.get("mineral_saturation", 0) for b in bases_list) / max(len(bases_list), 1)
+    )
+    avg_gas = (
+        sum(b.get("gas_saturation", 0) for b in bases_list) / max(len(bases_list), 1)
+    )
+
     return {
         "own_ratio": own_ratio,
         "has_structure": has_structure,
@@ -181,6 +192,11 @@ def prepare_builtins(
         "enemy_light": float(analysis.get("light_count", 0)),
         "enemy_massive": float(analysis.get("massive_count", 0)),
         "has_enemy": has_enemy(),
+        "undersaturated_bases": float(undersat),
+        "oversaturated_bases": float(oversat),
+        "idle_workers": float(idle),
+        "avg_mineral_sat": round(avg_mineral, 3),
+        "avg_gas_sat": round(avg_gas, 3),
         "pi": math.pi,
         "e": math.e,
     }

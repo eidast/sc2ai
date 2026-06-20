@@ -13,6 +13,12 @@ from src.bot.core import MyBot
 
 DEFAULT_MAP = "AcropolisLE"
 
+DIFFICULTY_CHOICES = [
+    "VeryEasy", "Easy", "Medium", "MediumHard",
+    "Hard", "Harder", "VeryHard",
+]
+RACE_CHOICES = ["Terran", "Zerg", "Protoss", "Random"]
+
 _system = platform.system()
 if _system == "Darwin":
     SC2_DIR = "/Applications/StarCraft II"
@@ -90,14 +96,38 @@ def main():
         "--fog", action="store_true",
         help="Enable fog of war (default: disabled for full visibility)",
     )
+    parser.add_argument(
+        "--difficulty", default="Medium",
+        choices=DIFFICULTY_CHOICES,
+        help=f"AI opponent difficulty (default: Medium). Choices: {', '.join(DIFFICULTY_CHOICES)}",
+    )
+    parser.add_argument(
+        "--opponent-race", default="Terran",
+        choices=RACE_CHOICES,
+        help=f"Opponent race (default: Terran). Choices: {', '.join(RACE_CHOICES)}",
+    )
+    parser.add_argument(
+        "--opponents", type=int, default=1,
+        choices=range(1, 5),
+        metavar="N",
+        help="Number of AI opponents, 1-4 (default: 1)",
+    )
 
     args = parser.parse_args()
 
     run_game(
         resolve_map(args.map),
         [
-            Bot(Race.Protoss, MyBot(surrender_enabled=args.surrender, fog_enabled=args.fog), fullscreen=True),
-            Computer(Race.Terran, Difficulty.Medium),
+            Bot(Race.Protoss, MyBot(
+                surrender_enabled=args.surrender,
+                fog_enabled=args.fog,
+                opponent_difficulty=args.difficulty,
+                opponent_race=args.opponent_race,
+                opponent_count=args.opponents,
+            ), fullscreen=True),
+        ] + [
+            Computer(Race[args.opponent_race], Difficulty[args.difficulty])
+            for _ in range(args.opponents)
         ],
         realtime=args.realtime,
         disable_fog=not args.fog,

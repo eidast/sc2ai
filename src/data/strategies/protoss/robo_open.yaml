@@ -34,11 +34,11 @@ priority_formulas:
   GATEWAY: "(gateway_units + (1 - robo_units) * 0.2) * (bases * 3 - has_structure('GATEWAY') * 2) / (bases * 3 + 1)"
   CYBERNETICSCORE: "gateway_units * (1 - has_structure('CYBERNETICSCORE'))"
   ROBOTICSFACILITY: "robo_units * (has_structure('CYBERNETICSCORE') * (1 - max(0, has_structure('ROBOTICSFACILITY') - bases) / (bases + 1)))"
-  NEXUS: "fast_expand * 0.5 + (minerals > 500 ? 0.3 : 0)"
-  FORGE: "ground_upgrades * (1 - has_structure('FORGE')) * (minerals > 300 ? 0.5 : 0.2)"
-  PROBE: "(workers < 70 ? (1 - workers / 70) : 0)"
+  NEXUS: "fast_expand * 0.5 + (oversaturated_bases > 0 and minerals > 300 ? 0.5 : 0) + (minerals > 500 ? 0.3 : 0)"
+  FORGE: "ground_upgrades * has_structure('GATEWAY') * (1 - has_structure('FORGE')) * (minerals > 300 ? 0.5 : 0.2)"
+  PROBE: "(workers < 70 and undersaturated_bases > 0 ? (1 - workers / 70) : 0)"
   PYLON: "supply_left < 4 ? 2.0 : 0.1"
-  ASSIMILATOR: "gas_heavy * (has_structure('ASSIMILATOR') < bases * 2 ? 1 : 0)"
+  ASSIMILATOR: "gas_heavy * (has_structure('ASSIMILATOR') < bases * 2 ? 1 : 0) * (avg_mineral_sat > 0.8 ? 1 : 0.5)"
 
 meta:
   bias_speed: 0.3

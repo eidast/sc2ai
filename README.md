@@ -52,6 +52,31 @@ uv run python scripts/run.py
 
 El script detecta automáticamente si estás en macOS o Windows y configura los paths correctos. El bot juega Protoss contra la IA integrada de Blizzard (Terran, dificultad Media) en modo acelerado.
 
+#### Opciones de línea de comandos
+
+| Flag | Default | Descripción |
+|---|---|---|
+| `--map` | `AcropolisLE` | Nombre del mapa o `random` para selección aleatoria |
+| `--realtime` | (desactivado) | Velocidad normal con renderizado (por defecto: acelerado) |
+| `--surrender` | (desactivado) | Rendición estratégica cuando la victoria es matemáticamente imposible |
+| `--fog` | (desactivado) | Activar niebla de guerra (por defecto: visibilidad completa) |
+| `--difficulty` | `Medium` | Dificultad de la IA enemiga: `VeryEasy`, `Easy`, `Medium`, `MediumHard`, `Hard`, `Harder`, `VeryHard` |
+| `--opponent-race` | `Terran` | Raza del oponente: `Terran`, `Zerg`, `Protoss`, `Random` |
+| `--opponents` | `1` | Número de oponentes (1–4). Todos comparten la misma dificultad y raza. |
+
+Ejemplos:
+
+```bash
+# Contra Zerg en dificultad Hard con niebla de guerra
+uv run python scripts/run.py --opponent-race Zerg --difficulty Hard --fog
+
+# 1v2 contra Terran VeryHard con rendición automática
+uv run python scripts/run.py --difficulty VeryHard --opponents 2 --surrender
+
+# Partida en tiempo real con mapa aleatorio
+uv run python scripts/run.py --map random --realtime
+```
+
 ### Estructura
 
 ```text
@@ -132,6 +157,31 @@ uv run python scripts/run.py
 ```
 
 The script auto-detects whether you're on macOS or Windows and configures the correct paths. The bot plays Protoss against Blizzard's built-in AI (Terran, Medium difficulty) in accelerated mode.
+
+#### CLI options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--map` | `AcropolisLE` | Map name or `random` for random selection |
+| `--realtime` | (disabled) | Normal speed with rendering (default: accelerated) |
+| `--surrender` | (disabled) | Strategic surrender when victory is mathematically impossible |
+| `--fog` | (disabled) | Enable fog of war (default: full visibility) |
+| `--difficulty` | `Medium` | Enemy AI difficulty: `VeryEasy`, `Easy`, `Medium`, `MediumHard`, `Hard`, `Harder`, `VeryHard` |
+| `--opponent-race` | `Terran` | Opponent race: `Terran`, `Zerg`, `Protoss`, `Random` |
+| `--opponents` | `1` | Number of opponents (1–4). All share the same difficulty and race. |
+
+Examples:
+
+```bash
+# Against Zerg on Hard difficulty with fog of war
+uv run python scripts/run.py --opponent-race Zerg --difficulty Hard --fog
+
+# 1v2 against Terran VeryHard with auto-surrender
+uv run python scripts/run.py --difficulty VeryHard --opponents 2 --surrender
+
+# Real-time match on a random map
+uv run python scripts/run.py --map random --realtime
+```
 
 ### Structure
 

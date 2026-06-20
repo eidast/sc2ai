@@ -147,6 +147,16 @@ def _compute_metrics(features: list[dict], events: list[dict]) -> dict:
             "current": b.get("current_workers", 0),
             "ideal": b.get("ideal_workers", 0),
             "ratio": b.get("saturation_ratio", 0),
+            "mineral_patches": b.get("mineral_patches", 0),
+            "gas_geysers": b.get("gas_geysers", 0),
+            "ideal_mineral_workers": b.get("ideal_mineral_workers", 0),
+            "ideal_gas_workers": b.get("ideal_gas_workers", 0),
+            "actual_mineral_workers": b.get("actual_mineral_workers", 0),
+            "actual_gas_workers": b.get("actual_gas_workers", 0),
+            "idle_workers_nearby": b.get("idle_workers_nearby", 0),
+            "mineral_saturation": b.get("mineral_saturation", 0),
+            "gas_saturation": b.get("gas_saturation", 0),
+            "status": b.get("status", "optimal"),
         }
         for b in last_bases
     ]
@@ -210,6 +220,54 @@ def _build_army_snapshots(
     return snapshots
 
 
+def _build_saturation_snapshots(
+    features: list[dict], interval_seconds: float = 60
+) -> list[dict]:
+    snapshots = []
+    last_time = -interval_seconds
+    for f in features:
+        t = f.get("game_time_seconds", 0)
+        if t - last_time >= interval_seconds:
+            bases = f.get("bases", [])
+            totals = {
+                "workers": f.get("worker_count", 0),
+                "bases": len(bases),
+                "oversaturated_bases": sum(
+                    1 for b in bases if b.get("status") == "oversaturated"
+                ),
+                "undersaturated_bases": sum(
+                    1 for b in bases if b.get("status") == "undersaturated"
+                ),
+                "idle_workers": sum(
+                    b.get("idle_workers_nearby", 0) for b in bases
+                ),
+                "avg_mineral_sat": round(
+                    sum(b.get("mineral_saturation", 0) for b in bases) / max(len(bases), 1), 3
+                ),
+                "avg_gas_sat": round(
+                    sum(b.get("gas_saturation", 0) for b in bases) / max(len(bases), 1), 3
+                ),
+            }
+            snapshots.append({
+                "time": int(t),
+                "bases": [
+                    {
+                        "base": i,
+                        "mineral_workers": b.get("actual_mineral_workers", 0),
+                        "gas_workers": b.get("actual_gas_workers", 0),
+                        "mineral_saturation": b.get("mineral_saturation", 0),
+                        "gas_saturation": b.get("gas_saturation", 0),
+                        "status": b.get("status", "optimal"),
+                        "idle": b.get("idle_workers_nearby", 0),
+                    }
+                    for i, b in enumerate(bases)
+                ],
+                "totals": totals,
+            })
+            last_time = t
+    return snapshots
+
+
 def generate_report_json(
     match_id: str,
     features: list[dict],
@@ -219,6 +277,7 @@ def generate_report_json(
     metrics = _compute_metrics(features, events)
     timeline = _build_timeline(features)
     army_snapshots = _build_army_snapshots(features)
+    saturation_timeline = _build_saturation_snapshots(features)
 
     raw_events = [
         {
@@ -247,6 +306,7 @@ def generate_report_json(
         "key_events": raw_events,
         "event_ranges": event_ranges,
         "timeline_data": timeline_data,
+        "saturation_timeline": saturation_timeline,
     }
 
 
@@ -268,6 +328,26 @@ def generate_report_md(report: dict) -> str:
     lines.append(f"- Supply blocks: {m['supply_block_count']}")
     lines.append(f"- Peak workers: {m['peak_workers']}/{m['worker_target']}")
     lines.append("")
+
+    sat_summary = m.get("saturation_summary", [])
+    if sat_summary:
+        lines.append("## Base Saturation")
+        for i, base in enumerate(sat_summary):
+            status = base.get("status", "optimal")
+            min_act = base.get("actual_mineral_workers", 0)
+            min_ideal = base.get("ideal_mineral_workers", 0)
+            gas_act = base.get("actual_gas_workers", 0)
+            gas_ideal = base.get("ideal_gas_workers", 0)
+            idle = base.get("idle_workers_nearby", 0)
+            idle_str = f" (Idle: {idle})" if idle > 0 else ""
+            lines.append(
+                f"- **Base {i + 1}** [{status}]: "
+                f"Minerals {min_act}/{min_ideal} "
+                f"({int(base.get('mineral_saturation', 0) * 100)}%) | "
+                f"Gas {gas_act}/{gas_ideal} "
+                f"({int(base.get('gas_saturation', 0) * 100)}%){idle_str}"
+            )
+        lines.append("")
 
     events = report.get("key_events", [])
     if events:
@@ -367,10 +447,42 @@ def generate_report_html(report: dict) -> str:
     sat_summary = m.get("saturation_summary", [])
     for i, base in enumerate(sat_summary):
         ratio_pct = base["ratio"] * 100
+        status = base.get("status", "optimal")
+        status_cls = "good" if status == "optimal" else ("bad" if status == "oversaturated" else "warn")
+        status_icon = "●" if status == "optimal" else ("▲" if status == "oversaturated" else "▾")
+        idle = base.get("idle_workers_nearby", 0)
+        idle_str = f' <span class="metric-value warn">Idle: {idle}</span>' if idle > 0 else ""
+
+        min_act = base.get("actual_mineral_workers", 0)
+        min_ideal = base.get("ideal_mineral_workers", 0)
+        min_sat = base.get("mineral_saturation", 0)
+        gas_act = base.get("actual_gas_workers", 0)
+        gas_ideal = base.get("ideal_gas_workers", 0)
+        gas_sat = base.get("gas_saturation", 0)
+
+        min_bar_w = min(100, int(min(min_sat, 1.0) * 100)) if min_ideal > 0 else 0
+        gas_bar_w = min(100, int(min(gas_sat, 1.0) * 100)) if gas_ideal > 0 else 0
+        min_over = min_sat > 1.0
+        gas_over = gas_sat > 1.0
+
         sat_rows += (
-            f'<tr><td>Base {i + 1}</td>'
-            f'<td>{base["current"]}/{base["ideal"]}</td>'
-            f'<td>{ratio_pct:.0f}%</td></tr>\n'
+            f'<div class="metric-card" style="flex:1;min-width:200px;">'
+            f'<h3>Base {i + 1} <span class="metric-value {status_cls}">{status_icon} {status}</span>{idle_str}</h3>'
+            f'<div style="margin:6px 0;">'
+            f'<span class="metric-label">Minerals</span> '
+            f'<span class="metric-value {"bad" if min_over else "good"}">{min_act}/{min_ideal}</span>'
+            f'<span style="color:#888;font-size:11px;"> ({int(min_sat*100)}%)</span>'
+            f'<div style="background:#333;border-radius:3px;height:8px;margin:3px 0;">'
+            f'<div style="width:{min_bar_w}%;height:100%;background:{"#e94560" if min_over else "#4ecdc4"};border-radius:3px;"></div>'
+            f'</div></div>'
+            f'<div style="margin:6px 0;">'
+            f'<span class="metric-label">Gas</span> '
+            f'<span class="metric-value {"bad" if gas_over else "good"}">{gas_act}/{gas_ideal}</span>'
+            f'<span style="color:#888;font-size:11px;"> ({int(gas_sat*100)}%)</span>'
+            f'<div style="background:#333;border-radius:3px;height:8px;margin:3px 0;">'
+            f'<div style="width:{gas_bar_w}%;height:100%;background:{"#e94560" if gas_over else "#4ecdc4"};border-radius:3px;"></div>'
+            f'</div></div>'
+            f'</div>\n'
         )
 
     d3_js = _read_d3_js()
@@ -476,10 +588,9 @@ tr:nth-child(even) {{ background: #1f3050; }}
 </div>
 
 <h2>Base Saturation</h2>
-<table>
-<tr><th>Base</th><th>Workers</th><th>Saturation</th></tr>
-{sat_rows if sat_rows else '<tr><td colspan="3">No base data available</td></tr>'}
-</table>
+<div style="display:flex;gap:16px;flex-wrap:wrap;">
+{sat_rows if sat_rows else '<p style="color:#888;">No base data available</p>'}
+</div>
 
 <script>{d3_js}</script>
 <script>

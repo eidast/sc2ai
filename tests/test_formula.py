@@ -264,3 +264,95 @@ class TestYamlFormulaComplex:
         result = evaluate_formula(formula, bias, builtins)
         expected = (0.6 * 0.6 + (1 - 0.3) * 0.3) * (1 - 0.2)
         assert result == pytest.approx(expected)
+
+
+class TestSaturationBuiltins:
+    def test_undersaturated_bases_builtin(self):
+        features = {
+            "bases": [
+                {"status": "undersaturated"},
+                {"status": "optimal"},
+                {"status": "undersaturated"},
+            ],
+            "game_time_seconds": 120, "minerals": 300, "vespene": 150,
+            "supply_used": 50, "supply_cap": 100, "supply_left": 50,
+            "worker_count": 30, "expansion_count": 3,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        builtins = prepare_builtins(features)
+        assert builtins["undersaturated_bases"] == 2.0
+
+    def test_oversaturated_bases_builtin(self):
+        features = {
+            "bases": [
+                {"status": "oversaturated"},
+                {"status": "optimal"},
+            ],
+            "game_time_seconds": 120, "minerals": 300, "vespene": 150,
+            "supply_used": 50, "supply_cap": 100, "supply_left": 50,
+            "worker_count": 30, "expansion_count": 2,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        builtins = prepare_builtins(features)
+        assert builtins["oversaturated_bases"] == 1.0
+
+    def test_idle_workers_builtin(self):
+        features = {
+            "bases": [
+                {"status": "optimal", "idle_workers_nearby": 2},
+                {"status": "undersaturated", "idle_workers_nearby": 1},
+            ],
+            "game_time_seconds": 120, "minerals": 300, "vespene": 150,
+            "supply_used": 50, "supply_cap": 100, "supply_left": 50,
+            "worker_count": 30, "expansion_count": 2,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        builtins = prepare_builtins(features)
+        assert builtins["idle_workers"] == 3.0
+
+    def test_avg_saturation_builtins(self):
+        features = {
+            "bases": [
+                {"status": "optimal", "mineral_saturation": 0.9, "gas_saturation": 1.0,
+                 "idle_workers_nearby": 0},
+                {"status": "optimal", "mineral_saturation": 0.7, "gas_saturation": 0.8,
+                 "idle_workers_nearby": 0},
+            ],
+            "game_time_seconds": 120, "minerals": 300, "vespene": 150,
+            "supply_used": 50, "supply_cap": 100, "supply_left": 50,
+            "worker_count": 30, "expansion_count": 2,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        builtins = prepare_builtins(features)
+        assert builtins["avg_mineral_sat"] == pytest.approx(0.8)
+        assert builtins["avg_gas_sat"] == pytest.approx(0.9)
+
+    def test_probe_formula_with_undersaturated(self):
+        bias = {}
+        features = {
+            "bases": [{"status": "undersaturated", "idle_workers_nearby": 0,
+                       "mineral_saturation": 0.5, "gas_saturation": 0.5}],
+            "game_time_seconds": 120, "minerals": 300, "vespene": 150,
+            "supply_used": 50, "supply_cap": 100, "supply_left": 50,
+            "worker_count": 30, "expansion_count": 1,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        builtins = prepare_builtins(features)
+        formula = "(workers < 70 and undersaturated_bases > 0 ? (1 - workers / 70) : 0)"
+        result = evaluate_formula(formula, bias, builtins)
+        assert result > 0
+
+    def test_probe_formula_no_undersaturated(self):
+        bias = {}
+        features = {
+            "bases": [{"status": "optimal", "idle_workers_nearby": 0,
+                       "mineral_saturation": 0.9, "gas_saturation": 0.8}],
+            "game_time_seconds": 120, "minerals": 300, "vespene": 150,
+            "supply_used": 50, "supply_cap": 100, "supply_left": 50,
+            "worker_count": 30, "expansion_count": 1,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        builtins = prepare_builtins(features)
+        formula = "(workers < 70 and undersaturated_bases > 0 ? (1 - workers / 70) : 0)"
+        result = evaluate_formula(formula, bias, builtins)
+        assert result == 0.0

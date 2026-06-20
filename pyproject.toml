@@ -18,9 +18,11 @@ packages = ["src"]
 [tool.uv]
 dev-dependencies = [
     "pytest>=8.0",
+    "pytest-asyncio>=1.2.0",
 ]
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]

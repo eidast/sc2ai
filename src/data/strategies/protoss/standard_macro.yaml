@@ -39,17 +39,17 @@ priority_formulas:
     - bases) / (bases + 1)))
   ROBOTICSFACILITY: robo_units * (has_structure('CYBERNETICSCORE') * (1 - max(0, has_structure('ROBOTICSFACILITY')
     - bases) / (bases + 1)))
-  NEXUS: 'fast_expand * 0.6 + (minerals > 500 ? 0.4 : 0)'
-  FORGE: 'ground_upgrades * (1 - has_structure(''FORGE'')) * (minerals > 300 ? 0.5
-    : 0.2)'
-  TWILIGHTCOUNCIL: 'gateway_units * 0.3 * (1 - has_structure(''TWILIGHTCOUNCIL''))
-    * (minerals > 300 and vespene > 100 ? 0.8 : 0.1)'
+  NEXUS: 'fast_expand * 0.6 + (oversaturated_bases > 0 and minerals > 300 ? 0.5 : 0) + (minerals > 500 ? 0.2 : 0)'
+  FORGE: 'ground_upgrades * has_structure(''GATEWAY'') * (1 - has_structure(''FORGE''))
+    * (minerals > 300 ? 0.5 : 0.2)'
+  TWILIGHTCOUNCIL: 'gateway_units * has_structure(''CYBERNETICSCORE'') * 0.3 * (1
+    - has_structure(''TWILIGHTCOUNCIL'')) * (minerals > 300 and vespene > 100 ? 0.8 : 0.1)'
   WARPGATERESEARCH: gateway_units * (1 - has_upgrade('WARPGATERESEARCH')) * has_structure('CYBERNETICSCORE')
   PROTOSSGROUNDWEAPONSLEVEL1: ground_upgrades * (1 - has_upgrade('PROTOSSGROUNDWEAPONSLEVEL1'))
     * has_structure('FORGE')
-  PROBE: '(workers < 70 ? (1 - workers / 70) : 0)'
+  PROBE: '(workers < 70 and undersaturated_bases > 0 ? (1 - workers / 70) : 0)'
   PYLON: 'supply_left < 4 ? 2.0 : 0.1'
-  ASSIMILATOR: 'gas_heavy * (has_structure(''ASSIMILATOR'') < bases * 2 ? 1 : 0)'
+  ASSIMILATOR: 'gas_heavy * (has_structure(''ASSIMILATOR'') < bases * 2 ? 1 : 0) * (avg_mineral_sat > 0.8 ? 1 : 0.5)'
 meta:
   bias_speed: 0.3
   scout_decay_rate: 0.05
