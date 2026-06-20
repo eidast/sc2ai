@@ -137,6 +137,12 @@ def extract_features(bot: BotAI) -> dict:
         if name in _WORKER_NAMES
     )
 
+    collected_minerals = 0
+    collected_vespene = 0
+    if hasattr(bot, "state") and bot.state and hasattr(bot.state, "score"):
+        collected_minerals = getattr(bot.state.score, "collected_minerals", 0)
+        collected_vespene = getattr(bot.state.score, "collected_vespene", 0)
+
     return {
         "minerals": bot.minerals,
         "vespene": bot.vespene,
@@ -166,6 +172,8 @@ def extract_features(bot: BotAI) -> dict:
         "enemy_t3_count": enemy_t3_count,
         "our_t3_count": our_t3_count,
         "bases": bases,
+        "collected_minerals": collected_minerals,
+        "collected_vespene": collected_vespene,
         "game_time_seconds": bot.time,
         "expansion_count": bot.townhalls.amount,
         "iteration": bot.state.game_loop if hasattr(bot, "state") else 0,

@@ -86,5 +86,35 @@ def test_extract_features_returns_required_keys_with_empty_defaults():
     assert features["enemy_t3_count"] == 0
     assert features["our_t3_count"] == 0
     assert features["enemy_worker_count"] == 0
+    assert features["collected_minerals"] == 0
+    assert features["collected_vespene"] == 0
     assert isinstance(features["bases"], list)
     assert len(features["bases"]) == 1
+
+
+def test_extract_features_includes_collected_resources_from_score():
+    score = SimpleNamespace(collected_minerals=15000, collected_vespene=4200)
+    bot = SimpleNamespace(
+        minerals=50,
+        vespene=0,
+        supply_used=12,
+        supply_cap=15,
+        supply_left=3,
+        workers=EmptyUnits(),
+        units=UnitCollection(0),
+        structures=UnitCollection(0),
+        enemy_units=UnitCollection(0),
+        enemy_structures=UnitCollection(0),
+        mineral_field=UnitCollection(0),
+        gas_buildings=UnitCollection(0),
+        time=120.0,
+        townhalls=TownhallCollection(1),
+        state=SimpleNamespace(game_loop=33, score=score),
+    )
+
+    features = extract_features(bot)
+
+    assert features["collected_minerals"] == 15000
+    assert features["collected_vespene"] == 4200
+    assert isinstance(features["collected_minerals"], int)
+    assert isinstance(features["collected_vespene"], int)

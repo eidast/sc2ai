@@ -5,6 +5,18 @@ from datetime import datetime
 from src.data.icons import render_unit_icon_svg
 
 
+_VENDOR_DIR = os.path.join(os.path.dirname(__file__), "vendor")
+
+
+def _read_d3_js() -> str:
+    path = os.path.join(_VENDOR_DIR, "d3.v7.min.js")
+    try:
+        with open(path) as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
+
 def _load_jsonl(path: str) -> list[dict]:
     rows = []
     try:
@@ -18,6 +30,72 @@ def _load_jsonl(path: str) -> list[dict]:
     return rows
 
 
+def _build_event_ranges(events: list[dict]) -> list[dict]:
+    if not events:
+        return []
+
+    by_type: dict[str, list[dict]] = {}
+    for e in events:
+        etype = e.get("type", "unknown")
+        if etype not in by_type:
+            by_type[etype] = []
+        by_type[etype].append(e)
+
+    ranges = []
+    for etype, typed_events in by_type.items():
+        typed_events.sort(key=lambda e: e.get("time", 0))
+        severity = typed_events[0].get("severity", "info")
+        run_start = typed_events[0].get("time", 0)
+        run_end = run_start
+        run_count = 1
+
+        for e in typed_events[1:]:
+            etime = e.get("time", 0)
+            run_end = etime
+            run_count += 1
+
+        ranges.append({
+            "type": etype,
+            "severity": severity,
+            "count": run_count,
+            "first": run_start,
+            "last": run_end,
+            "duration": round(run_end - run_start, 3),
+        })
+
+    severity_order = {"high": 0, "medium": 1, "info": 2}
+    ranges.sort(key=lambda r: (severity_order.get(r["severity"], 3), -r["count"]))
+    return ranges
+
+
+def _build_timeline_data(event_ranges: list[dict], duration: float) -> dict:
+    ranged_events = []
+    point_events = []
+
+    for r in event_ranges:
+        if r["duration"] > 0:
+            ranged_events.append({
+                "type": r["type"],
+                "severity": r["severity"],
+                "start": r["first"],
+                "end": r["last"],
+                "count": r["count"],
+            })
+        else:
+            point_events.append({
+                "type": r["type"],
+                "time": r["first"],
+                "severity": r["severity"],
+                "details": f"count: {r['count']}",
+            })
+
+    return {
+        "ranges": ranged_events,
+        "points": point_events,
+        "duration": duration,
+    }
+
+
 def _compute_metrics(features: list[dict], events: list[dict]) -> dict:
     if not features:
         return {}
@@ -26,13 +104,42 @@ def _compute_metrics(features: list[dict], events: list[dict]) -> dict:
     total_vespene = sum(f.get("vespene", 0) for f in features)
     n = len(features)
 
-    supply_blocks = [
-        {"time": e["time"], "duration_steps": 1}
-        for e in events if e.get("type") == "supply_block"
-    ]
+    event_ranges = _build_event_ranges(events)
+    supply_block_ranges = [r for r in event_ranges if r["type"] == "supply_block"]
+    supply_block_count = sum(r["count"] for r in supply_block_ranges)
 
     worker_counts = [f.get("worker_count", 0) for f in features]
     peak_workers = max(worker_counts) if worker_counts else 0
+
+    supply_used_vals = [f.get("supply_used", 0) for f in features]
+    supply_cap_vals = [f.get("supply_cap", 0) for f in features]
+    max_supply = max(supply_used_vals) if supply_used_vals else 0
+    max_supply_cap = max(supply_cap_vals) if supply_cap_vals else 0
+
+    army_counts = [f.get("army_count", 0) for f in features]
+    max_army_size = max(army_counts) if army_counts else 0
+
+    our_army_values = [f.get("our_army_value", 0) for f in features]
+    enemy_army_values = [f.get("enemy_army_value", 0) for f in features]
+    our_army_value_peak = max(our_army_values) if our_army_values else 0
+    enemy_army_value_peak = max(enemy_army_values) if enemy_army_values else 0
+
+    our_t3_counts = [f.get("our_t3_count", 0) for f in features]
+    enemy_t3_counts = [f.get("enemy_t3_count", 0) for f in features]
+    our_t3_peak = max(our_t3_counts) if our_t3_counts else 0
+    enemy_t3_peak = max(enemy_t3_counts) if enemy_t3_counts else 0
+
+    last_features = features[-1]
+    collected_minerals = last_features.get("collected_minerals", 0)
+    collected_vespene = last_features.get("collected_vespene", 0)
+    avg_unspent_minerals = total_minerals / n
+    avg_unspent_vespene = total_vespene / n
+    mineral_efficiency = (
+        round((collected_minerals - avg_unspent_minerals) / max(collected_minerals, 1) * 100, 1)
+    )
+    vespene_efficiency = (
+        round((collected_vespene - avg_unspent_vespene) / max(collected_vespene, 1) * 100, 1)
+    )
 
     last_bases = features[-1].get("bases", []) if features else []
     saturation_summary = [
@@ -45,13 +152,24 @@ def _compute_metrics(features: list[dict], events: list[dict]) -> dict:
     ]
 
     return {
-        "avg_unspent_minerals": round(total_minerals / n, 1),
-        "avg_unspent_vespene": round(total_vespene / n, 1),
-        "supply_blocks": supply_blocks,
-        "supply_block_count": len(supply_blocks),
+        "avg_unspent_minerals": round(avg_unspent_minerals, 1),
+        "avg_unspent_vespene": round(avg_unspent_vespene, 1),
+        "collected_minerals": collected_minerals,
+        "collected_vespene": collected_vespene,
+        "mineral_efficiency": mineral_efficiency,
+        "vespene_efficiency": vespene_efficiency,
+        "supply_block_count": supply_block_count,
+        "supply_block_ranges": supply_block_ranges,
         "peak_workers": peak_workers,
         "worker_target": 70,
         "total_steps": n,
+        "max_supply": max_supply,
+        "max_supply_cap": max_supply_cap,
+        "max_army_size": max_army_size,
+        "our_army_value_peak": our_army_value_peak,
+        "enemy_army_value_peak": enemy_army_value_peak,
+        "our_t3_peak": our_t3_peak,
+        "enemy_t3_peak": enemy_t3_peak,
         "saturation_summary": saturation_summary,
     }
 
@@ -102,26 +220,33 @@ def generate_report_json(
     timeline = _build_timeline(features)
     army_snapshots = _build_army_snapshots(features)
 
+    raw_events = [
+        {
+            "time": e.get("time", 0),
+            "type": e.get("type", "unknown"),
+            "severity": e.get("severity", "info"),
+        }
+        for e in events
+    ]
+    event_ranges = _build_event_ranges(raw_events)
+    duration = features[-1].get("game_time_seconds", 0) if features else 0
+    timeline_data = _build_timeline_data(event_ranges, duration)
+
     return {
         "match_id": match_id,
         "map": bot_info.get("map", "unknown") if bot_info else "unknown",
         "opponent_race": bot_info.get("opponent_race", "unknown") if bot_info else "unknown",
         "opponent_difficulty": bot_info.get("opponent_difficulty", "unknown") if bot_info else "unknown",
         "our_race": "Protoss",
-        "duration_seconds": features[-1].get("game_time_seconds", 0) if features else 0,
+        "duration_seconds": duration,
         "result": bot_info.get("result", "unknown") if bot_info else "unknown",
         "max_supply_reached": max((f.get("supply_used", 0) for f in features), default=0),
         "timeline": timeline,
         "army_snapshots": army_snapshots,
         "metrics": metrics,
-        "key_events": [
-            {
-                "time": e.get("time", 0),
-                "type": e.get("type", "unknown"),
-                "severity": e.get("severity", "info"),
-            }
-            for e in events
-        ],
+        "key_events": raw_events,
+        "event_ranges": event_ranges,
+        "timeline_data": timeline_data,
     }
 
 
@@ -182,23 +307,32 @@ def _render_unit_icon(unit_name: str, size: int = 24) -> str:
 
 
 def generate_report_html(report: dict) -> str:
+    import json as _json
+
     r = report
     m = r["metrics"]
-    events = r.get("key_events", [])
     snaps = r.get("army_snapshots", [])
     timeline = r.get("timeline", [])
 
     supply_vals = [t["supply_used"] for t in timeline]
     supply_spark = _sparkline(supply_vals, 50, 200)
 
-    event_html = ""
-    for e in events:
-        icon = "⚠" if e["severity"] == "high" else "•"
-        event_html += (
-            f'<tr><td>{icon}</td>'
-            f'<td>{e["time"]:.0f}s</td>'
-            f'<td>{e["type"]}</td>'
-            f'<td>{e["severity"]}</td></tr>\n'
+    event_ranges = r.get("event_ranges", [])
+    timeline_data = r.get("timeline_data", {})
+
+    event_rows = ""
+    for er in event_ranges:
+        dur_str = f'{er["duration"]:.0f}s' if er["duration"] > 0 else "—"
+        icon = "⚠" if er["severity"] == "high" else ("●" if er["severity"] == "medium" else "•")
+        event_rows += (
+            f'<tr>'
+            f'<td>{icon}</td>'
+            f'<td class="evt-{er["severity"]}">{er["type"]}</td>'
+            f'<td>{er["count"]:,}</td>'
+            f'<td>{er["first"]:.0f}s</td>'
+            f'<td>{er["last"]:.0f}s</td>'
+            f'<td>{dur_str}</td>'
+            f'</tr>\n'
         )
 
     our_rows = ""
@@ -239,15 +373,18 @@ def generate_report_html(report: dict) -> str:
             f'<td>{ratio_pct:.0f}%</td></tr>\n'
         )
 
+    d3_js = _read_d3_js()
+    timeline_json = _json.dumps(timeline_data)
+
     return f"""<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="utf-8">
 <title>Match Report: {r['match_id']}</title>
 <style>
-body {{ font-family: -apple-system, sans-serif; max-width: 960px; margin: 0 auto; padding: 20px; background: #1a1a2e; color: #e0e0e0; }}
-h1 {{ color: #e94560; }}
-h2 {{ color: #f5c542; border-bottom: 1px solid #333; }}
+body {{ font-family: -apple-system, sans-serif; max-width: 1100px; margin: 0 auto; padding: 20px; background: #1a1a2e; color: #e0e0e0; }}
+h1 {{ color: #e94560; margin-bottom: 4px; }}
+h2 {{ color: #f5c542; border-bottom: 1px solid #333; margin-top: 24px; }}
 table {{ border-collapse: collapse; width: 100%; margin: 10px 0; }}
 th, td {{ border: 1px solid #333; padding: 6px 10px; text-align: left; }}
 th {{ background: #16213e; }}
@@ -256,11 +393,70 @@ tr:nth-child(even) {{ background: #1f3050; }}
 .col {{ flex: 1; }}
 .sparkline {{ font-size: 18px; letter-spacing: -1px; }}
 .warning {{ color: #f5c542; }}
+.subtitle {{ color: #888; font-size: 14px; margin-bottom: 16px; }}
+.metric-card {{ background: #16213e; border: 1px solid #333; border-radius: 6px; padding: 14px 18px; margin-bottom: 16px; }}
+.metric-card h3 {{ margin: 0 0 10px 0; color: #f5c542; font-size: 14px; }}
+.metric-grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; }}
+.metric-label {{ color: #888; font-size: 12px; }}
+.metric-value {{ font-size: 15px; font-weight: 600; }}
+.metric-value.good {{ color: #4ecdc4; }}
+.metric-value.bad {{ color: #e94560; }}
+.metric-value.warn {{ color: #f5c542; }}
+.evt-high {{ color: #e94560; }}
+.evt-medium {{ color: #f5c542; }}
+.evt-info {{ color: #4a9eff; }}
+.timeline-container {{ position: relative; background: #16213e; border: 1px solid #333; border-radius: 6px; overflow: hidden; margin: 10px 0; }}
+.timeline-container svg {{ display: block; }}
+.tooltip {{ position: absolute; background: #0d0d1a; border: 1px solid #555; border-radius: 4px; padding: 6px 10px; font-size: 12px; pointer-events: none; opacity: 0; transition: opacity 0.15s; z-index: 10; max-width: 280px; }}
 </style>
 </head>
 <body>
 <h1>SC2AI Match Report</h1>
-<p><strong>Match:</strong> {r['match_id']} | <strong>Map:</strong> {r['map']} | <strong>Result:</strong> {r['result']} | <strong>Duration:</strong> {r['duration_seconds']:.0f}s</p>
+<p class="subtitle"><strong>Match:</strong> {r['match_id']} | <strong>Map:</strong> {r['map']} | <strong>Result:</strong> {r['result']} | <strong>Duration:</strong> {r['duration_seconds']:.0f}s | <strong>Opponent:</strong> {r['opponent_race']} ({r['opponent_difficulty']})</p>
+
+<div class="columns">
+<div class="col">
+<div class="metric-card">
+<h3>Economy</h3>
+<div class="metric-grid">
+<span class="metric-label">Minerals gathered</span><span class="metric-value good">{m['collected_minerals']:,}</span>
+<span class="metric-label">Vespene gathered</span><span class="metric-value good">{m['collected_vespene']:,}</span>
+<span class="metric-label">Avg unspent minerals</span><span class="metric-value warn">{m['avg_unspent_minerals']:,}</span>
+<span class="metric-label">Avg unspent vespene</span><span class="metric-value warn">{m['avg_unspent_vespene']:,}</span>
+<span class="metric-label">Mineral efficiency</span><span class="metric-value {'good' if m['mineral_efficiency'] >= 70 else 'bad' if m['mineral_efficiency'] < 40 else 'warn'}">{m['mineral_efficiency']}%</span>
+<span class="metric-label">Vespene efficiency</span><span class="metric-value {'good' if m['vespene_efficiency'] >= 70 else 'bad' if m['vespene_efficiency'] < 40 else 'warn'}">{m['vespene_efficiency']}%</span>
+<span class="metric-label">Peak workers</span><span class="metric-value">{m['peak_workers']}/{m['worker_target']}</span>
+<span class="metric-label">Supply blocks</span><span class="metric-value {'good' if m['supply_block_count'] < 10 else 'bad'}">{m['supply_block_count']:,}</span>
+</div>
+</div>
+</div>
+<div class="col">
+<div class="metric-card">
+<h3>Army</h3>
+<div class="metric-grid">
+<span class="metric-label">Max supply</span><span class="metric-value">{m['max_supply']}/{m['max_supply_cap']}</span>
+<span class="metric-label">Max army size</span><span class="metric-value">{m['max_army_size']}</span>
+<span class="metric-label">Army value peak</span><span class="metric-value good">{m['our_army_value_peak']:,}</span>
+<span class="metric-label">Enemy army value (visible)</span><span class="metric-value bad">{m['enemy_army_value_peak']:,}</span>
+<span class="metric-label">Our T3 units</span><span class="metric-value">{m['our_t3_peak']}</span>
+<span class="metric-label">Enemy T3 units</span><span class="metric-value {'good' if m['enemy_t3_peak'] == 0 else 'bad'}">{m['enemy_t3_peak']}</span>
+</div>
+</div>
+</div>
+</div>
+
+<h2>Events</h2>
+<table>
+<tr><th></th><th>Event</th><th>Count</th><th>First</th><th>Last</th><th>Duration</th></tr>
+{event_rows if event_rows else '<tr><td colspan="6">No events recorded</td></tr>'}
+</table>
+
+<h2>Timeline</h2>
+<div class="timeline-container" id="timeline"></div>
+
+<h2>Supply</h2>
+<p class="sparkline">Supply (0–200): {supply_spark}</p>
+<p>Max supply reached: {r['max_supply_reached']}/{m['max_supply_cap']} | Workers: {m['peak_workers']}/{m['worker_target']}</p>
 
 <div class="columns">
 <div class="col">
@@ -285,24 +481,105 @@ tr:nth-child(even) {{ background: #1f3050; }}
 {sat_rows if sat_rows else '<tr><td colspan="3">No base data available</td></tr>'}
 </table>
 
-<h2>Supply</h2>
-<p class="sparkline">Supply (0–200): {supply_spark}</p>
-<p>Max supply reached: {r['max_supply_reached']}/200 | Workers: {m['peak_workers']}/{m['worker_target']}</p>
+<script>{d3_js}</script>
+<script>
+(function() {{
+  var data = {timeline_json};
+  if (!data || (!data.ranges.length && !data.points.length)) {{
+    document.getElementById("timeline").innerHTML = '<p style="padding:20px;color:#888;">No events recorded</p>';
+    return;
+  }}
 
-<h2>Events</h2>
-<table>
-<tr><th></th><th>Time</th><th>Event</th><th>Severity</th></tr>
-{event_html}
-</table>
+  var SEVERITY_COLORS = {{ high: "#e94560", medium: "#f5c542", info: "#4a9eff" }};
+  var MARGIN = {{ top: 10, right: 20, bottom: 30, left: 150 }};
+  var container = document.getElementById("timeline");
+  var W = container.clientWidth;
+  var H = 280;
+  var width = W - MARGIN.left - MARGIN.right;
+  var height = H - MARGIN.top - MARGIN.bottom;
 
-<h2>Metrics</h2>
-<table>
-<tr><th>Metric</th><th>Value</th></tr>
-<tr><td>Average unspent minerals</td><td>{m['avg_unspent_minerals']}</td></tr>
-<tr><td>Average unspent vespene</td><td>{m['avg_unspent_vespene']}</td></tr>
-<tr><td>Supply blocks</td><td class="warning">{m['supply_block_count']}</td></tr>
-<tr><td>Peak workers</td><td>{m['peak_workers']}/{m['worker_target']}</td></tr>
-</table>
+  var allTypes = [];
+  data.ranges.forEach(function(r) {{ if (allTypes.indexOf(r.type) === -1) allTypes.push(r.type); }});
+  data.points.forEach(function(p) {{ if (allTypes.indexOf(p.type) === -1) allTypes.push(p.type); }});
+
+  var x = d3.scaleLinear().domain([0, data.duration || 1]).range([0, width]);
+  var y = d3.scaleBand().domain(allTypes).range([0, height]).padding(0.3);
+
+  var svg = d3.select("#timeline").append("svg")
+    .attr("width", W).attr("height", H)
+    .call(d3.zoom().scaleExtent([1, 50]).translateExtent([[0, 0], [W, H]])
+      .on("zoom", function(event) {{
+        g.attr("transform", event.transform);
+      }}));
+
+  var g = svg.append("g").attr("transform", "translate(" + MARGIN.left + "," + MARGIN.top + ")");
+
+  g.append("g").call(d3.axisLeft(y).tickSize(0).tickPadding(6))
+    .selectAll("text").attr("fill", "#ccc").style("font-size", "11px");
+
+  g.append("g").attr("transform", "translate(0," + height + ")")
+    .call(d3.axisBottom(x).ticks(10).tickFormat(function(d) {{ return d + "s"; }}))
+    .selectAll("text").attr("fill", "#888").style("font-size", "10px");
+
+  var tooltip = d3.select("#timeline").append("div")
+    .attr("class", "tooltip");
+
+  var laneHeight = y.bandwidth();
+
+  data.ranges.forEach(function(r) {{
+    var yPos = y(r.type);
+    if (yPos === undefined) return;
+    g.append("rect")
+      .attr("x", x(r.start))
+      .attr("y", yPos)
+      .attr("width", function() {{ var w = x(r.end) - x(r.start); return Math.max(w, 2); }})
+      .attr("height", laneHeight)
+      .attr("fill", SEVERITY_COLORS[r.severity] || "#666")
+      .attr("rx", 2).attr("ry", 2)
+      .attr("opacity", 0.85)
+      .on("mouseover", function(event) {{
+        tooltip.style("opacity", 1)
+          .html("<strong>" + r.type + "</strong><br>"
+            + "Count: " + r.count.toLocaleString() + "<br>"
+            + "Time: " + r.start.toFixed(1) + "s – " + r.end.toFixed(1) + "s<br>"
+            + "Duration: " + (r.end - r.start).toFixed(1) + "s<br>"
+            + "Severity: " + r.severity)
+          .style("left", (event.offsetX + 12) + "px")
+          .style("top", (event.offsetY - 10) + "px");
+      }})
+      .on("mousemove", function(event) {{
+        tooltip.style("left", (event.offsetX + 12) + "px")
+          .style("top", (event.offsetY - 10) + "px");
+      }})
+      .on("mouseout", function() {{ tooltip.style("opacity", 0); }});
+  }});
+
+  data.points.forEach(function(p) {{
+    var yPos = y(p.type);
+    if (yPos === undefined) return;
+    g.append("circle")
+      .attr("cx", x(p.time))
+      .attr("cy", yPos + laneHeight / 2)
+      .attr("r", 5)
+      .attr("fill", SEVERITY_COLORS[p.severity] || "#4a9eff")
+      .attr("stroke", "#fff")
+      .attr("stroke-width", 1.5)
+      .on("mouseover", function(event) {{
+        tooltip.style("opacity", 1)
+          .html("<strong>" + p.type + "</strong><br>"
+            + "Time: " + p.time.toFixed(1) + "s<br>"
+            + "Severity: " + p.severity)
+          .style("left", (event.offsetX + 12) + "px")
+          .style("top", (event.offsetY - 10) + "px");
+      }})
+      .on("mousemove", function(event) {{
+        tooltip.style("left", (event.offsetX + 12) + "px")
+          .style("top", (event.offsetY - 10) + "px");
+      }})
+      .on("mouseout", function() {{ tooltip.style("opacity", 0); }});
+  }});
+}})();
+</script>
 </body>
 </html>"""
 
