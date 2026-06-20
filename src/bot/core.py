@@ -8,6 +8,7 @@ from sc2.ids.upgrade_id import UpgradeId
 from sc2.unit import Unit
 from sc2.units import Units
 from sc2.position import Point2
+from sc2.data import Result
 
 from src.bot.strategy import BuildPhase, CameraMode, MAX_SATURATION_RATIO, BASE_MINERAL_RADIUS, THREAT_RANGE, ENGAGE_RANGE, GATEWAY_MINERAL_BASELINE, GATEWAY_PER_BASE, GATEWAY_MINERAL_FLOAT_THRESHOLD, GATEWAY_MINERAL_FLOAT_EXTRA, MAX_GATEWAYS, FORGE_MINERAL_THRESHOLD
 
@@ -75,6 +76,24 @@ class MyBot(BotAI):
             os.makedirs(reports_dir, exist_ok=True)
             self._features_file = os.path.join(reports_dir, "features.jsonl")
             self._events_file = os.path.join(reports_dir, "events.jsonl")
+
+        if not self._surrender_fired and hasattr(self, "state") and self.state.player_result:
+            for pr in self.state.player_result:
+                if pr.player_id != self.state.common.player_id and pr.result == Result.Defeat.value:
+                    self._surrender_fired = True
+                    self._decision_state = DecisionState.WON
+                    self.logger.info("SC2 engine: enemy defeated — victory")
+            if self._decision_state == DecisionState.WON:
+                if self._events_file:
+                    with open(self._events_file, "a") as f:
+                        f.write(json.dumps({
+                            "type": "victory",
+                            "time": self.time,
+                            "step": iteration,
+                            "severity": "info",
+                            "details": {"source": "player_result"},
+                        }) + "\n")
+                return
 
         features = extract_features(self)
         self._last_enemy_analysis = features.get("enemy_army_analysis", {})
