@@ -31,11 +31,11 @@ def should_build_forge(
     minerals: float,
     vespene: float,
     has_forge: bool = False,
-    threshold: float = 300,
+    threshold: float = 500,
 ) -> bool:
     if has_forge:
         return False
-    return minerals > threshold and vespene > 50
+    return minerals + vespene > threshold
 
 
 def should_build_twilight(

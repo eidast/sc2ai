@@ -5,6 +5,7 @@ from src.strategies.types import (
     StrategyProfile,
     ScoutingAdjustment,
     MetaParams,
+    FormulaEntry,
 )
 from src.strategies.schema import validate, ValidationError as SchemaValidationError
 
@@ -91,12 +92,22 @@ class StrategyLoader:
             target_bases=int(meta_raw.get("target_bases", 4)),
         )
 
+        formulas: dict[str, FormulaEntry] = {}
+        for key, value in raw.get("priority_formulas", {}).items():
+            if isinstance(value, str):
+                formulas[key] = FormulaEntry(formula=value)
+            elif isinstance(value, dict):
+                formulas[key] = FormulaEntry(
+                    formula=value["formula"],
+                    requires=value.get("requires", []),
+                )
+
         return StrategyProfile(
             name=raw.get("name", "unnamed"),
             race=raw.get("race", "Protoss"),
             initial_biases=raw.get("initial_biases", {}),
             scouting_adjustments=adjustments,
-            priority_formulas=raw.get("priority_formulas", {}),
+            priority_formulas=formulas,
             meta=meta,
             description=raw.get("description", ""),
         )

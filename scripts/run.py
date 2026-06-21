@@ -2,6 +2,7 @@ import argparse
 import platform
 import random
 import sys
+from pathlib import Path
 
 from sc2 import maps
 from sc2.data import Race, Difficulty
@@ -18,6 +19,7 @@ DIFFICULTY_CHOICES = [
     "Hard", "Harder", "VeryHard",
 ]
 RACE_CHOICES = ["Terran", "Zerg", "Protoss", "Random"]
+POLICY_MODE_CHOICES = ["heuristic", "ml_shadow"]
 
 _system = platform.system()
 if _system == "Darwin":
@@ -112,8 +114,39 @@ def main():
         metavar="N",
         help="Number of AI opponents, 1-4 (default: 1)",
     )
+    parser.add_argument(
+        "--policy-mode", default="heuristic",
+        choices=POLICY_MODE_CHOICES,
+        help="Policy mode for this run (default: heuristic)",
+    )
+    parser.add_argument(
+        "--experiment-id", default=None,
+        help="Optional experiment identifier for report attribution",
+    )
+    parser.add_argument(
+        "--model-name", default=None,
+        help="Optional shadow model name for report attribution",
+    )
+    parser.add_argument(
+        "--model-version", default=None,
+        help="Optional shadow model version for report attribution",
+    )
+    parser.add_argument(
+        "--shadow-profile", action="append", default=None,
+        dest="shadow_profile",
+        help="Shadow strategy profile to run in ml_shadow mode. Repeatable. "
+             "Available: stargate_open, robo_open, fast_expand",
+    )
 
     args = parser.parse_args()
+
+    if args.policy_mode == "ml_shadow" and not args.shadow_profile:
+        strategies_dir = Path(__file__).resolve().parent.parent / "src" / "data" / "strategies" / "protoss"
+        available = sorted(p.stem for p in strategies_dir.glob("*.yaml"))
+        parser.error(
+            f"--policy-mode ml_shadow requires at least one --shadow-profile. "
+            f"Available profiles: {', '.join(available)}"
+        )
 
     run_game(
         resolve_map(args.map),
@@ -124,6 +157,11 @@ def main():
                 opponent_difficulty=args.difficulty,
                 opponent_race=args.opponent_race,
                 opponent_count=args.opponents,
+                policy_mode=args.policy_mode,
+                experiment_id=args.experiment_id,
+                model_name=args.model_name,
+                model_version=args.model_version,
+                shadow_profiles=args.shadow_profile,
             ), fullscreen=True),
         ] + [
             Computer(Race[args.opponent_race], Difficulty[args.difficulty])

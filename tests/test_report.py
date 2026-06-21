@@ -1,6 +1,7 @@
+import json
 from types import SimpleNamespace
 
-from src.ml.report import generate_report_json, generate_report_md, generate_report_html, _build_saturation_snapshots
+from src.ml.report import generate_report_json, generate_report_md, generate_report_html, generate_index, _build_saturation_snapshots
 
 
 def test_generate_report_json_shape():
@@ -54,6 +55,36 @@ def test_generate_report_json_shape():
     assert report["metrics"]["our_t3_peak"] == 1
     assert report["metrics"]["enemy_t3_peak"] == 2
     assert "saturation_summary" in report["metrics"]
+    assert report["policy"]["mode"] == "unknown"
+    assert report["policy"]["selected_policy"] == "unknown"
+
+
+def test_generate_report_json_preserves_policy_metadata():
+    bot_info = {
+        "map": "AcropolisLE",
+        "opponent_race": "Terran",
+        "opponent_difficulty": "Medium",
+        "result": "victory",
+        "policy": {
+            "mode": "ml_shadow",
+            "selected_policy": "heuristic",
+            "heuristic_profile": "standard_macro",
+            "model_name": "priority_mlp",
+            "model_version": "20260620-001",
+            "experiment_id": "ab-shadow-v1",
+            "code_version": "abc123",
+        },
+    }
+
+    report = generate_report_json("test", [], [], bot_info)
+
+    assert report["policy"]["mode"] == "ml_shadow"
+    assert report["policy"]["selected_policy"] == "heuristic"
+    assert report["policy"]["heuristic_profile"] == "standard_macro"
+    assert report["policy"]["model_name"] == "priority_mlp"
+    assert report["policy"]["model_version"] == "20260620-001"
+    assert report["policy"]["experiment_id"] == "ab-shadow-v1"
+    assert report["policy"]["code_version"] == "abc123"
 
 
 def test_generate_report_md():
@@ -65,6 +96,15 @@ def test_generate_report_md():
         "duration_seconds": 100,
         "result": "victory",
         "max_supply_reached": 50,
+        "policy": {
+            "mode": "ml_shadow",
+            "selected_policy": "heuristic",
+            "heuristic_profile": "standard_macro",
+            "model_name": "priority_mlp",
+            "model_version": "20260620-001",
+            "experiment_id": "ab-shadow-v1",
+            "code_version": "abc123",
+        },
         "metrics": {
             "avg_unspent_minerals": 100,
             "avg_unspent_vespene": 50,
@@ -86,6 +126,11 @@ def test_generate_report_md():
     assert "TestMap" in md
     assert "victory" in md
     assert "Metrics" in md
+    assert "Policy" in md
+    assert "ml_shadow" in md
+    assert "standard_macro" in md
+    assert "20260620-001" in md
+    assert "abc123" in md
     assert "supply_block_count" not in md.lower()
 
 
@@ -98,6 +143,15 @@ def test_generate_report_html_contains_required_elements():
         "duration_seconds": 100,
         "result": "victory",
         "max_supply_reached": 50,
+        "policy": {
+            "mode": "ml_shadow",
+            "selected_policy": "heuristic",
+            "heuristic_profile": "standard_macro",
+            "model_name": "priority_mlp",
+            "model_version": "20260620-001",
+            "experiment_id": "ab-shadow-v1",
+            "code_version": "abc123",
+        },
         "timeline": [
             {"supply_used": 6, "time": 0},
             {"supply_used": 15, "time": 50},
@@ -147,6 +201,11 @@ def test_generate_report_html_contains_required_elements():
     assert "Minerals gathered" in html
     assert "Timeline" in html
     assert "Events" in html
+    assert "Policy" in html
+    assert "ml_shadow" in html
+    assert "standard_macro" in html
+    assert "20260620-001" in html
+    assert "abc123" in html
 
 
 def test_saturation_summary_includes_enriched_fields():
@@ -246,3 +305,52 @@ def test_build_saturation_snapshots():
     assert snapshots[0]["bases"][0]["mineral_workers"] == 12
     assert snapshots[0]["totals"]["undersaturated_bases"] == 1
     assert snapshots[0]["totals"]["oversaturated_bases"] == 0
+
+
+def test_generate_index_includes_policy_fields(tmp_path):
+    reports_dir = tmp_path / "reports"
+    match_dir = reports_dir / "match-1"
+    match_dir.mkdir(parents=True)
+    report = {
+        "map": "AcropolisLE",
+        "result": "victory",
+        "duration_seconds": 120,
+        "max_supply_reached": 42,
+        "policy": {
+            "mode": "ml_shadow",
+            "selected_policy": "heuristic",
+            "heuristic_profile": "standard_macro",
+            "model_name": "priority_mlp",
+            "model_version": "20260620-001",
+            "experiment_id": "ab-shadow-v1",
+        },
+    }
+    (match_dir / "report.json").write_text(json.dumps(report))
+
+    generate_index(str(tmp_path))
+
+    html = (reports_dir / "index.html").read_text()
+    assert "Policy" in html
+    assert "ml_shadow" in html
+    assert "standard_macro" in html
+    assert "priority_mlp" in html
+    assert "20260620-001" in html
+    assert "ab-shadow-v1" in html
+
+
+def test_generate_index_handles_old_reports_without_policy(tmp_path):
+    reports_dir = tmp_path / "reports"
+    match_dir = reports_dir / "match-1"
+    match_dir.mkdir(parents=True)
+    report = {
+        "map": "AcropolisLE",
+        "result": "defeat",
+        "duration_seconds": 120,
+        "max_supply_reached": 42,
+    }
+    (match_dir / "report.json").write_text(json.dumps(report))
+
+    generate_index(str(tmp_path))
+
+    html = (reports_dir / "index.html").read_text()
+    assert "unknown" in html

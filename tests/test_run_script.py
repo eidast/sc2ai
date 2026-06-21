@@ -3,7 +3,7 @@ import sys
 
 import pytest
 
-from scripts.run import DEFAULT_MAP, DIFFICULTY_CHOICES, RACE_CHOICES, _list_maps, resolve_map
+from scripts.run import DEFAULT_MAP, DIFFICULTY_CHOICES, POLICY_MODE_CHOICES, RACE_CHOICES, _list_maps, resolve_map
 
 
 def _parse_args(argv: list[str]):
@@ -20,6 +20,11 @@ def _parse_args(argv: list[str]):
     parser.add_argument("--difficulty", default="Medium", choices=DIFFICULTY_CHOICES)
     parser.add_argument("--opponent-race", default="Terran", choices=RACE_CHOICES)
     parser.add_argument("--opponents", type=int, default=1, choices=range(1, 5))
+    parser.add_argument("--policy-mode", default="heuristic", choices=POLICY_MODE_CHOICES)
+    parser.add_argument("--experiment-id", default=None)
+    parser.add_argument("--model-name", default=None)
+    parser.add_argument("--model-version", default=None)
+    parser.add_argument("--shadow-profile", action="append", default=None, dest="shadow_profile")
     return parser.parse_args(argv)
 
 
@@ -139,6 +144,7 @@ class TestDefaults:
         assert args.difficulty == "Medium"
         assert args.opponent_race == "Terran"
         assert args.opponents == 1
+        assert args.policy_mode == "heuristic"
 
     def test_combined_flags(self):
         args = _parse_args([
@@ -149,3 +155,35 @@ class TestDefaults:
         assert args.difficulty == "Hard"
         assert args.opponent_race == "Protoss"
         assert args.opponents == 2
+
+
+class TestPolicyFlags:
+    def test_valid_policy_mode_accepted(self):
+        args = _parse_args(["--policy-mode", "ml_shadow"])
+        assert args.policy_mode == "ml_shadow"
+
+    def test_invalid_policy_mode_rejected(self):
+        with pytest.raises(SystemExit):
+            _parse_args(["--policy-mode", "ml"])
+
+    def test_policy_metadata_flags_accepted(self):
+        args = _parse_args([
+            "--experiment-id", "ab-shadow-v1",
+            "--model-name", "priority_mlp",
+            "--model-version", "20260620-001",
+        ])
+        assert args.experiment_id == "ab-shadow-v1"
+        assert args.model_name == "priority_mlp"
+        assert args.model_version == "20260620-001"
+
+    def test_shadow_profiles_accepted(self):
+        args = _parse_args(["--shadow-profile", "stargate_open"])
+        assert args.shadow_profile == ["stargate_open"]
+
+    def test_multiple_shadow_profiles_accepted(self):
+        args = _parse_args([
+            "--shadow-profile", "stargate_open",
+            "--shadow-profile", "robo_open",
+            "--shadow-profile", "fast_expand",
+        ])
+        assert args.shadow_profile == ["stargate_open", "robo_open", "fast_expand"]

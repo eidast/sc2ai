@@ -28,10 +28,18 @@ priority_formulas:
   STALKER: (gateway_units * 0.6 + (1 - robo_units) * 0.3) * (1 - own_ratio('STALKER'))
   ZEALOT: gateway_units * 0.5 * (1 - own_ratio('ZEALOT'))
   SENTRY: gateway_units * 0.2 * (1 - own_ratio('SENTRY'))
-  IMMORTAL: robo_units * 0.8 * (1 - own_ratio('IMMORTAL'))
-  COLOSSUS: robo_units * 0.6 * ground_upgrades * (1 - own_ratio('COLOSSUS'))
-  VOIDRAY: stargate_units * 0.7 * (1 - own_ratio('VOIDRAY'))
-  PHOENIX: stargate_units * 0.5 * (1 - own_ratio('PHOENIX'))
+  IMMORTAL:
+    formula: "robo_units * 0.8 * (1 - own_ratio('IMMORTAL'))"
+    requires: ["ROBOTICSFACILITY"]
+  COLOSSUS:
+    formula: "robo_units * 0.6 * ground_upgrades * (1 - own_ratio('COLOSSUS'))"
+    requires: ["ROBOTICSFACILITY"]
+  VOIDRAY:
+    formula: "stargate_units * 0.7 * (1 - own_ratio('VOIDRAY'))"
+    requires: ["STARGATE"]
+  PHOENIX:
+    formula: "stargate_units * 0.5 * (1 - own_ratio('PHOENIX'))"
+    requires: ["STARGATE"]
   GATEWAY: '(gateway_units + (1 - robo_units) * 0.3) * (bases < 1 ? 1 : (bases * 3
     - (has_structure(''GATEWAY'') * 2)) / (bases * 3 + 1))'
   CYBERNETICSCORE: gateway_units * (1 - has_structure('CYBERNETICSCORE'))
@@ -44,7 +52,9 @@ priority_formulas:
     * (minerals > 300 ? 0.5 : 0.2)'
   TWILIGHTCOUNCIL: 'gateway_units * has_structure(''CYBERNETICSCORE'') * 0.3 * (1
     - has_structure(''TWILIGHTCOUNCIL'')) * (minerals > 300 and vespene > 100 ? 0.8 : 0.1)'
-  WARPGATERESEARCH: gateway_units * (1 - has_upgrade('WARPGATERESEARCH')) * has_structure('CYBERNETICSCORE')
+  WARPGATERESEARCH:
+    formula: "gateway_units * (1 - has_upgrade('WARPGATERESEARCH')) * has_structure('CYBERNETICSCORE')"
+    requires: ["CYBERNETICSCORE"]
   PROTOSSGROUNDWEAPONSLEVEL1: ground_upgrades * (1 - has_upgrade('PROTOSSGROUNDWEAPONSLEVEL1'))
     * has_structure('FORGE')
   PROBE: '(workers < 70 and undersaturated_bases > 0 ? (1 - workers / 70) : 0)'

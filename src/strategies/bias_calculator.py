@@ -1,7 +1,6 @@
 """Bias calculator — converts scouting + metrics into continuous bias vector."""
 
 import logging
-import math
 
 from src.strategies.types import StrategyProfile, ScoutingAdjustment
 from src.strategies.formula import evaluate_condition
@@ -31,9 +30,6 @@ class BiasCalculator:
 
         self._game_time = float(features.get("game_time_seconds", 0))
 
-        if scout_metadata:
-            self._apply_scout_decay(scout_metadata)
-
         for adj in self._profile.scouting_adjustments:
             confidence = self._get_adjustment_confidence(adj, features, scout_metadata)
             if confidence <= 0:
@@ -46,12 +42,6 @@ class BiasCalculator:
             self._biases[key] = max(0.0, min(1.0, self._biases[key]))
 
         return dict(self._biases)
-
-    def _apply_scout_decay(self, metadata: dict[str, dict]) -> None:
-        decay_rate = self._profile.meta.scout_decay_rate
-        for unit_data in metadata.values():
-            if isinstance(unit_data, dict) and "confidence" in unit_data:
-                unit_data["confidence"] *= math.exp(-decay_rate)
 
     def _get_adjustment_confidence(
         self,

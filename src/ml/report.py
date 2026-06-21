@@ -290,6 +290,7 @@ def generate_report_json(
     event_ranges = _build_event_ranges(raw_events)
     duration = features[-1].get("game_time_seconds", 0) if features else 0
     timeline_data = _build_timeline_data(event_ranges, duration)
+    policy = _normalize_policy(bot_info.get("policy") if bot_info else None)
 
     return {
         "match_id": match_id,
@@ -299,6 +300,7 @@ def generate_report_json(
         "our_race": "Protoss",
         "duration_seconds": duration,
         "result": bot_info.get("result", "unknown") if bot_info else "unknown",
+        "policy": policy,
         "max_supply_reached": max((f.get("supply_used", 0) for f in features), default=0),
         "timeline": timeline,
         "army_snapshots": army_snapshots,
@@ -307,6 +309,19 @@ def generate_report_json(
         "event_ranges": event_ranges,
         "timeline_data": timeline_data,
         "saturation_timeline": saturation_timeline,
+    }
+
+
+def _normalize_policy(policy: dict | None) -> dict:
+    policy = policy or {}
+    return {
+        "mode": policy.get("mode", "unknown"),
+        "selected_policy": policy.get("selected_policy", "unknown"),
+        "heuristic_profile": policy.get("heuristic_profile", "unknown"),
+        "model_name": policy.get("model_name"),
+        "model_version": policy.get("model_version"),
+        "experiment_id": policy.get("experiment_id"),
+        "code_version": policy.get("code_version", "unknown"),
     }
 
 
@@ -319,6 +334,17 @@ def generate_report_md(report: dict) -> str:
     lines.append(f"- **Duration**: {report['duration_seconds']:.0f}s")
     lines.append(f"- **Result**: {report['result']}")
     lines.append(f"- **Max Supply**: {report['max_supply_reached']}")
+    lines.append("")
+
+    policy = _normalize_policy(report.get("policy"))
+    lines.append("## Policy")
+    lines.append(f"- Mode: {policy['mode']}")
+    lines.append(f"- Selected policy: {policy['selected_policy']}")
+    lines.append(f"- Heuristic profile: {policy['heuristic_profile']}")
+    lines.append(f"- Model: {policy['model_name'] or 'unknown'}")
+    lines.append(f"- Model version: {policy['model_version'] or 'unknown'}")
+    lines.append(f"- Experiment: {policy['experiment_id'] or 'unknown'}")
+    lines.append(f"- Code version: {policy['code_version'] or 'unknown'}")
     lines.append("")
 
     m = report["metrics"]
@@ -399,6 +425,7 @@ def generate_report_html(report: dict) -> str:
 
     event_ranges = r.get("event_ranges", [])
     timeline_data = r.get("timeline_data", {})
+    policy = _normalize_policy(r.get("policy"))
 
     event_rows = ""
     for er in event_ranges:
@@ -523,9 +550,21 @@ tr:nth-child(even) {{ background: #1f3050; }}
 </style>
 </head>
 <body>
-<h1>SC2AI Match Report</h1>
-<p class="subtitle"><strong>Match:</strong> {r['match_id']} | <strong>Map:</strong> {r['map']} | <strong>Result:</strong> {r['result']} | <strong>Duration:</strong> {r['duration_seconds']:.0f}s | <strong>Opponent:</strong> {r['opponent_race']} ({r['opponent_difficulty']})</p>
-
+	<h1>SC2AI Match Report</h1>
+	<p class="subtitle"><strong>Match:</strong> {r['match_id']} | <strong>Map:</strong> {r['map']} | <strong>Result:</strong> {r['result']} | <strong>Duration:</strong> {r['duration_seconds']:.0f}s | <strong>Opponent:</strong> {r['opponent_race']} ({r['opponent_difficulty']})</p>
+	<div class="metric-card">
+	<h3>Policy</h3>
+	<div class="metric-grid">
+	<span class="metric-label">Mode</span><span class="metric-value">{policy['mode']}</span>
+	<span class="metric-label">Selected policy</span><span class="metric-value">{policy['selected_policy']}</span>
+	<span class="metric-label">Heuristic profile</span><span class="metric-value">{policy['heuristic_profile']}</span>
+	<span class="metric-label">Model</span><span class="metric-value">{policy['model_name'] or 'unknown'}</span>
+	<span class="metric-label">Model version</span><span class="metric-value">{policy['model_version'] or 'unknown'}</span>
+	<span class="metric-label">Experiment</span><span class="metric-value">{policy['experiment_id'] or 'unknown'}</span>
+	<span class="metric-label">Code version</span><span class="metric-value">{policy['code_version'] or 'unknown'}</span>
+	</div>
+	</div>
+	
 <div class="columns">
 <div class="col">
 <div class="metric-card">
@@ -733,6 +772,7 @@ def generate_index(project_root: str) -> None:
         try:
             with open(report_path) as f:
                 r = json.load(f)
+            policy = _normalize_policy(r.get("policy"))
             rows += (
                 f'<tr>'
                 f'<td><a href="{entry}/report.html">{entry}</a></td>'
@@ -740,6 +780,12 @@ def generate_index(project_root: str) -> None:
                 f'<td>{r.get("result", "?")}</td>'
                 f'<td>{r.get("duration_seconds", 0):.0f}s</td>'
                 f'<td>{r.get("max_supply_reached", 0)}</td>'
+                f'<td>{policy["mode"]}</td>'
+                f'<td>{policy["selected_policy"]}</td>'
+                f'<td>{policy["heuristic_profile"]}</td>'
+                f'<td>{policy["model_name"] or "unknown"}</td>'
+                f'<td>{policy["model_version"] or "unknown"}</td>'
+                f'<td>{policy["experiment_id"] or "unknown"}</td>'
                 f'</tr>\n'
             )
         except (json.JSONDecodeError, KeyError):
@@ -763,7 +809,7 @@ a {{ color: #f5c542; }}
 <body>
 <h1>SC2AI — Match Reports</h1>
 <table>
-<tr><th>Date</th><th>Map</th><th>Result</th><th>Duration</th><th>Max Supply</th></tr>
+	<tr><th>Date</th><th>Map</th><th>Result</th><th>Duration</th><th>Max Supply</th><th>Policy</th><th>Selected</th><th>Profile</th><th>Model</th><th>Model Version</th><th>Experiment</th></tr>
 {rows}
 </table>
 <p>{len(rows.splitlines())} matches recorded.</p>

@@ -38,7 +38,12 @@ _ACTION_CATEGORIES = {
 class PriorityEngine:
     def __init__(self, profile: StrategyProfile):
         self._profile = profile
-        self._formulas: dict[str, str] = dict(profile.priority_formulas)
+        self._formulas: dict[str, str] = {
+            k: v.formula for k, v in profile.priority_formulas.items()
+        }
+        self._requires: dict[str, list[str]] = {
+            k: v.requires for k, v in profile.priority_formulas.items()
+        }
 
     def evaluate(
         self,
@@ -48,6 +53,7 @@ class PriorityEngine:
         own_composition: dict[str, int] | None = None,
         structures: dict[str, int] | None = None,
         completed_upgrades: set[str] | None = None,
+        prev_action: Action | None = None,
     ) -> Action:
         builtins = prepare_builtins(
             features,
@@ -60,7 +66,8 @@ class PriorityEngine:
         candidates = self._get_formula_actions()
 
         for target, action_type in candidates:
-            if not self._is_reachable(target, action_type, features, structures, completed_upgrades):
+            entry_requires = self._requires.get(target)
+            if not self._is_reachable(target, action_type, features, structures, completed_upgrades, requires=entry_requires):
                 continue
 
             formula = self._formulas.get(target)
@@ -68,6 +75,11 @@ class PriorityEngine:
                 continue
 
             score = evaluate_formula(formula, bias_vector, builtins)
+
+            if prev_action and prev_action.type != ActionType.NOOP:
+                if action_type == prev_action.type and target == prev_action.target:
+                    score *= 1.15
+
             if score > best_action.score:
                 best_action = Action(type=action_type, target=target, score=score)
             elif score == best_action.score and best_action.score >= 0:
@@ -106,6 +118,7 @@ class PriorityEngine:
         features: dict,
         structures: dict[str, int] | None,
         completed_upgrades: set[str] | None,
+        requires: list[str] | None = None,
     ) -> bool:
         supply_left = features.get("supply_left", 0)
         minerals = features.get("minerals", 0)
@@ -116,5 +129,10 @@ class PriorityEngine:
 
         if minerals <= 0 and action_type != ActionType.NOOP:
             return False
+
+        if requires and structures is not None:
+            for req in requires:
+                if structures.get(req, 0) <= 0:
+                    return False
 
         return True

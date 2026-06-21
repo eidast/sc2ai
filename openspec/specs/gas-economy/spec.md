@@ -12,7 +12,7 @@ The system SHALL iterate through all geysers across all nexuses when attempting 
 - **THEN** the bot SHALL continue checking geysers at remaining nexuses
 
 ### Requirement: Only one assimilator is built per step
-The system SHALL build at most one assimilator per `on_step` call regardless of how many geysers are available. The system SHALL NOT build a second Assimilator until at least one Gateway structure exists.
+The system SHALL build at most one assimilator per `on_step` call regardless of how many geysers are available. The system SHALL NOT build a second Assimilator until at least one Gateway or Warpgate structure exists (combined count > 0).
 
 #### Scenario: One assimilator per step
 - **WHEN** multiple geysers are affordable and unoccupied
@@ -30,15 +30,19 @@ The system SHALL assign idle or mineral-gathering workers to assimilators that h
 - **THEN** no worker reassignment SHALL occur
 
 ### Requirement: Gas construction is limited before Gateway exists
-The system SHALL NOT build a second Assimilator until at least one Gateway exists. This prevents `manage_gas` from consuming workers needed for Gateway construction during early game.
+The system SHALL NOT build a second Assimilator until at least one Gateway or Warpgate exists (combined count > 0). This prevents `manage_gas` from consuming workers needed for Gateway construction during early game. The system SHALL also require at least one Pylon before building the first Assimilator, ensuring the correct build order: Pylon → Gateway → Assimilator.
 
-#### Scenario: Gas building stopped at one assimilator without Gateway
-- **WHEN** the bot has 1 Assimilator, 0 Gateways, and an unoccupied geyser is available
+#### Scenario: Gas building stopped at one assimilator without Gateway or Warpgate
+- **WHEN** the bot has 1 Assimilator, 0 Gateways, 0 Warpgates, and an unoccupied geyser is available
 - **THEN** the bot SHALL NOT build a second Assimilator
 
-#### Scenario: Gas building resumes after Gateway
-- **WHEN** the bot has 1 Assimilator, at least 1 Gateway, and an unoccupied geyser is available
+#### Scenario: Gas building resumes after Gateway or Warpgate
+- **WHEN** the bot has 1 Assimilator, at least 1 Gateway or Warpgate, and an unoccupied geyser is available
 - **THEN** the bot SHALL build a second Assimilator normally
+
+#### Scenario: No assimilator built before first Pylon
+- **WHEN** the bot has 0 Pylons and an unoccupied geyser is available
+- **THEN** `manage_gas` SHALL NOT build an Assimilator
 
 ### Requirement: Gas starvation is detected as an event
 The system SHALL detect when the bot has high minerals (≥ 300), low vespene (< 100), and the mineral-to-vespene ratio exceeds 3:1. The event SHALL also trigger when no assimilators exist despite having affordable minerals.
@@ -54,3 +58,14 @@ The system SHALL detect when the bot has high minerals (≥ 300), low vespene (<
 #### Scenario: No gas starved when gas is adequate
 - **WHEN** vespene ≥ 100
 - **THEN** no `gas_starved` event SHALL be emitted
+
+### Requirement: Assimilator construction waits for Pylon
+`manage_gas()` SHALL check for a Pylon before building any Assimilator. If no Pylon exists, the method SHALL return without building gas or assigning gas workers.
+
+#### Scenario: Gas skipped when no Pylon exists
+- **WHEN** the bot has 0 Pylons, 1 Nexus, and an unoccupied geyser
+- **THEN** `manage_gas` SHALL return without building an Assimilator
+
+#### Scenario: Gas built after Pylon exists
+- **WHEN** the bot has at least 1 Pylon, 0 Assimilators, and an unoccupied geyser
+- **THEN** `manage_gas` SHALL proceed to build the first Assimilator normally

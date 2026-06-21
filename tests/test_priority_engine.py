@@ -1,5 +1,5 @@
 import pytest
-from src.strategies.types import StrategyProfile, Action, ActionType, MetaParams
+from src.strategies.types import StrategyProfile, Action, ActionType, MetaParams, FormulaEntry
 from src.strategies.priority_engine import PriorityEngine
 
 
@@ -12,6 +12,11 @@ def _make_profile(**overrides) -> StrategyProfile:
         "meta": MetaParams(),
     }
     defaults.update(overrides)
+    formulas = defaults["priority_formulas"]
+    if formulas and isinstance(next(iter(formulas.values()), None), str):
+        defaults["priority_formulas"] = {
+            k: FormulaEntry(formula=v) for k, v in formulas.items()
+        }
     return StrategyProfile(**defaults)
 
 
@@ -163,3 +168,117 @@ class TestPriorityEngine:
         action = engine.evaluate(bias, features, own_composition=own_comp)
         assert action.target == "STALKER"
         assert action.score == pytest.approx(0.8 * 0.6 * 0.5)
+
+
+class TestTechTreeFiltering:
+    def test_action_with_satisfied_requires_is_evaluated(self):
+        profile = _make_profile(priority_formulas={
+            "COLOSSUS": FormulaEntry(formula="0.9", requires=["ROBOTICSBAY"]),
+        })
+        engine = PriorityEngine(profile)
+        features = {
+            "minerals": 500, "vespene": 300,
+            "supply_left": 5, "supply_used": 30, "worker_count": 20,
+            "game_time_seconds": 200, "expansion_count": 2,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        structures = {"ROBOTICSBAY": 1}
+        action = engine.evaluate({"robo_units": 0.8}, features, structures=structures)
+        assert action.target == "COLOSSUS"
+        assert action.score > 0
+
+    def test_action_with_missing_requires_is_filtered(self):
+        profile = _make_profile(priority_formulas={
+            "COLOSSUS": FormulaEntry(formula="0.9", requires=["ROBOTICSBAY"]),
+            "STALKER": FormulaEntry(formula="0.5"),
+        })
+        engine = PriorityEngine(profile)
+        features = {
+            "minerals": 500, "vespene": 300,
+            "supply_left": 5, "supply_used": 30, "worker_count": 20,
+            "game_time_seconds": 200, "expansion_count": 2,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        action = engine.evaluate({"robo_units": 0.8}, features, structures={})
+        assert action.target == "STALKER"
+
+    def test_backward_compatible_string_formula_no_requires(self):
+        profile = _make_profile(priority_formulas={"STALKER": "0.9"})
+        engine = PriorityEngine(profile)
+        features = {
+            "minerals": 500, "vespene": 300,
+            "supply_left": 5, "supply_used": 30, "worker_count": 20,
+            "game_time_seconds": 200, "expansion_count": 2,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        action = engine.evaluate({}, features)
+        assert action.target == "STALKER"
+
+
+class TestMomentum:
+    def test_momentum_boosts_same_action(self):
+        profile = _make_profile(priority_formulas={
+            "STALKER": FormulaEntry(formula="0.5"),
+            "ZEALOT": FormulaEntry(formula="0.48"),
+        })
+        engine = PriorityEngine(profile)
+        features = {
+            "minerals": 500, "vespene": 300,
+            "supply_left": 5, "supply_used": 30, "worker_count": 20,
+            "game_time_seconds": 200, "expansion_count": 2,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        prev = Action(type=ActionType.BUILD_UNIT, target="STALKER", score=0.5)
+        action = engine.evaluate({}, features, prev_action=prev)
+        assert action.target == "STALKER"
+        assert action.score == pytest.approx(0.5 * 1.15)
+
+    def test_momentum_ignored_when_prev_is_none(self):
+        profile = _make_profile(priority_formulas={
+            "STALKER": FormulaEntry(formula="0.5"),
+            "ZEALOT": FormulaEntry(formula="0.48"),
+        })
+        engine = PriorityEngine(profile)
+        features = {
+            "minerals": 500, "vespene": 300,
+            "supply_left": 5, "supply_used": 30, "worker_count": 20,
+            "game_time_seconds": 200, "expansion_count": 2,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        action = engine.evaluate({}, features, prev_action=None)
+        assert action.target == "STALKER"
+        assert action.score == 0.5
+
+    def test_momentum_ignored_when_prev_is_noop(self):
+        profile = _make_profile(priority_formulas={
+            "STALKER": FormulaEntry(formula="0.5"),
+            "ZEALOT": FormulaEntry(formula="0.48"),
+        })
+        engine = PriorityEngine(profile)
+        features = {
+            "minerals": 500, "vespene": 300,
+            "supply_left": 5, "supply_used": 30, "worker_count": 20,
+            "game_time_seconds": 200, "expansion_count": 2,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        prev = Action(type=ActionType.NOOP, target="", score=0.0)
+        action = engine.evaluate({}, features, prev_action=prev)
+        assert action.target == "STALKER"
+        assert action.score == 0.5
+
+    def test_momentum_applied_to_correct_engine_only(self):
+        profile = _make_profile(priority_formulas={
+            "STALKER": FormulaEntry(formula="0.5"),
+            "VOIDRAY": FormulaEntry(formula="0.49"),
+        })
+        engine = PriorityEngine(profile)
+        features = {
+            "minerals": 500, "vespene": 300,
+            "supply_left": 5, "supply_used": 30, "worker_count": 20,
+            "game_time_seconds": 200, "expansion_count": 2,
+            "enemy_visible_units": 0, "enemy_army_analysis": {},
+        }
+        prev = Action(type=ActionType.BUILD_UNIT, target="VOIDRAY", score=0.49)
+        action = engine.evaluate({}, features, prev_action=prev)
+        assert action.target == "VOIDRAY"
+        assert action.score == pytest.approx(0.49 * 1.15)

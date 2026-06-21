@@ -1,6 +1,5 @@
-import math
 import pytest
-from src.strategies.types import StrategyProfile, ScoutingAdjustment, MetaParams
+from src.strategies.types import StrategyProfile, ScoutingAdjustment, MetaParams, FormulaEntry
 from src.strategies.bias_calculator import BiasCalculator
 
 
@@ -14,6 +13,11 @@ def _make_profile(**overrides) -> StrategyProfile:
         "meta": MetaParams(bias_speed=0.3, scout_decay_rate=0.05),
     }
     defaults.update(overrides)
+    formulas = defaults["priority_formulas"]
+    if formulas and isinstance(next(iter(formulas.values()), None), str):
+        defaults["priority_formulas"] = {
+            k: FormulaEntry(formula=v) for k, v in formulas.items()
+        }
     return StrategyProfile(**defaults)
 
 
@@ -126,13 +130,13 @@ class TestBiasCalculatorClamping:
 
 
 class TestBiasCalculatorScoutDecay:
-    def test_decay_reduces_confidence(self):
+    def test_does_not_mutate_scout_metadata(self):
         profile = _make_profile(meta=MetaParams(scout_decay_rate=1.0))
         calc = BiasCalculator(profile)
         metadata = {"marine": {"last_seen": 100, "confidence": 1.0}}
+        original_confidence = metadata["marine"]["confidence"]
         calc.update({"game_time_seconds": 100}, scout_metadata=metadata)
-        assert metadata["marine"]["confidence"] < 1.0
-        assert metadata["marine"]["confidence"] > 0.3
+        assert metadata["marine"]["confidence"] == original_confidence
 
     def test_no_scout_metadata_uses_default_confidence(self):
         profile = _make_profile(

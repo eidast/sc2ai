@@ -37,9 +37,24 @@ The system SHALL train probes at the least saturated nexus when `undersaturated_
 - **WHEN** a `supply_block` event is detected (supply_left < 3 and no pylon pending)
 - **THEN** the bot SHALL prioritize pylon construction above other build actions
 
-#### Scenario: Natural expansion
-- **WHEN** ALL current nexuses have saturation ratio ≥ 0.9 AND the bot can afford a Nexus AND no Nexus is already pending
-- **THEN** the bot SHALL send a probe to build a Nexus at the next expansion location. There SHALL be no hard limit on the number of expansions.
+### Requirement: Natural expansion
+The system SHALL expand when ALL current nexuses have a saturation ratio at or above the pressure-adaptive threshold (NONE: 0.65, LOW: 0.75, MEDIUM: 0.85, HIGH: no expansion), AND the bot can afford a Nexus, AND no Nexus is already pending. The system SHALL also expand when minerals exceed the pressure-adaptive banking threshold (NONE: 350, LOW: 400, MEDIUM: 500, HIGH: no expansion), regardless of saturation. There SHALL be no hard limit on the number of expansions.
+
+#### Scenario: Natural expansion at pressure NONE
+- **WHEN** pressure is NONE, all current nexuses have saturation ratio ≥ 0.65, AND the bot can afford a Nexus AND no Nexus is already pending
+- **THEN** the bot SHALL send a probe to build a Nexus at the next expansion location
+
+#### Scenario: Natural expansion at pressure LOW
+- **WHEN** pressure is LOW, all current nexuses have saturation ratio ≥ 0.75, AND the bot can afford a Nexus AND no Nexus is already pending
+- **THEN** the bot SHALL send a probe to build a Nexus
+
+#### Scenario: No expansion at pressure MEDIUM below threshold
+- **WHEN** pressure is MEDIUM, saturation ratio is 0.80, and can afford Nexus
+- **THEN** the bot SHALL NOT expand (0.80 < 0.85 threshold)
+
+#### Scenario: No expansion at pressure HIGH
+- **WHEN** pressure is HIGH, saturation ratio is 1.0, minerals > 600
+- **THEN** the bot SHALL NOT expand
 
 #### Scenario: Tech progression
 - **WHEN** the bot has a completed Gateway
@@ -49,21 +64,27 @@ The system SHALL train probes at the least saturated nexus when `undersaturated_
 - **WHEN** the strategy engine evaluates priority formulas for structures
 - **THEN** the formulas for Forge, Twilight Council, Robotics Facility, and Stargate SHALL include `has_structure('GATEWAY')` or `has_structure('CYBERNETICSCORE')` as a multiplication factor so their score is zero when the prerequisite structure is missing
 
-#### Scenario: Natural expansion
-- **WHEN** ALL current nexuses have saturation ratio ≥ 0.9 AND the bot can afford a Nexus AND no Nexus is already pending
-- **THEN** the bot SHALL send a probe to build a Nexus at the next expansion location. There SHALL be no hard limit on the number of expansions.
+### Requirement: Army production
+The system SHALL produce a proportional mix of army units from the top-3 recommended counters, distributing production across all available production structures (Gateway, Warpgate, Robotics Facility, Stargate) each step. Gateway-bound counters SHALL be produced from Gateway/Warpgate, Robo-bound from Robotics Facility, Stargate-bound from Stargate. When a structure type has no matching counter in the top-3, it SHALL default to a standard unit (Stalker/Zealot for Gateway, Immortal for Robo, Void Ray for Stargate).
 
-#### Scenario: Expansion triggered by mineral banking
-- **WHEN** minerals exceed 400 AND no Nexus is pending AND no Nexus is already building
-- **THEN** the bot SHALL expand, regardless of base saturation ratio
+#### Scenario: Army production from all structures
+- **WHEN** the bot has Gateways, Robos, and Stargates, and most-enemy units are ROACH
+- **THEN** Gateway SHALL produce Zealot/Stalker, Robo SHALL produce Immortal, and Stargate SHALL produce its unit
 
-#### Scenario: Army production
-- **WHEN** the bot has available resources and production capacity
-- **THEN** the bot SHALL produce army units (Stalkers, Zealots) from Gateways
+#### Scenario: Production scales with available resources
+- **WHEN** the bot has available minerals and vespene and idle production structures
+- **THEN** all idle structures SHALL attempt to produce simultaneously in a single step
 
-#### Scenario: Attack driven by decision engine
-- **WHEN** the decision engine transitions to ATTACK state
-- **THEN** the bot SHALL send idle army units to attack the enemy starting location. Attack commands SHALL take priority over defensive repositioning.
+### Requirement: Attack driven by decision engine
+The system SHALL transition from DEFEND to ATTACK when the decision engine detects army value advantage, supply cap, enemy push counter-attack, T3 window, or 60-second hoard timeout. The hoard timeout SHALL require army_count >= 8, army_value_ratio > 0.8, and DEFEND state sustained for 60 seconds.
+
+#### Scenario: Hoard timeout triggers attack
+- **WHEN** the bot has been in DEFEND for 65 seconds, has 10 army units, and army_value_ratio is 0.85
+- **THEN** the decision engine SHALL transition to ATTACK with reason "hoard timeout"
+
+#### Scenario: Severely outmatched bot does not attack on timeout
+- **WHEN** the bot has been in DEFEND for 65 seconds, has 10 army units, but army_value_ratio is 0.3
+- **THEN** the decision engine SHALL remain in DEFEND
 
 #### Scenario: Surrender when decision engine triggers
 - **WHEN** the decision engine transitions to SURRENDER state AND surrender is enabled
@@ -112,19 +133,23 @@ The system SHALL make `manage_attack()` actively search for and destroy remainin
 - **THEN** the bot SHALL still accept victory only from SC2 `player_result` or the existing sustained no-enemy-visible heuristic
 
 ### Requirement: Gateway production capacity scales with economy
-The system SHALL dynamically compute the target gateway count based on the number of bases and current mineral float. The target SHALL be capped at 16 gateways.
+The system SHALL dynamically compute the target gateway count based on the number of bases, current mineral float, and the current pressure level. The target SHALL be capped at 16 gateways.
 
 #### Scenario: One base baseline
-- **WHEN** the bot has 1 base and minerals < 500
+- **WHEN** the bot has 1 base, pressure is NONE, and minerals < 500
 - **THEN** the target gateway count SHALL be 4
 
-#### Scenario: Scales with bases
-- **WHEN** the bot has 2 bases and minerals < 500
-- **THEN** the target gateway count SHALL be 7
+#### Scenario: Extra gateways under pressure
+- **WHEN** the bot has 1 base, pressure is MEDIUM, and minerals < 500
+- **THEN** the target gateway count SHALL be 6 (baseline 4 + pressure 2)
 
-#### Scenario: Extra gateways when floating
-- **WHEN** the bot has 2 bases and minerals > 500
-- **THEN** the target gateway count SHALL increase by 2
+#### Scenario: Scales with bases
+- **WHEN** the bot has 2 bases, pressure is NONE, and minerals < 500
+- **THEN** the target gateway count SHALL be 7 (4 + 1*3)
+
+#### Scenario: Extra gateways when floating under pressure
+- **WHEN** the bot has 2 bases, pressure is LOW, and minerals > 500
+- **THEN** the target gateway count SHALL increase by 3 (pressure-based float extra)
 
 #### Scenario: Respects maximum cap
 - **WHEN** the computed target exceeds 16
@@ -245,3 +270,28 @@ The system SHALL execute `manage_worker_transfer()` on every `on_step` as part o
 #### Scenario: Worker transfer does not interfere with other managers
 - **WHEN** `manage_worker_transfer()` issues a gather order to a worker
 - **THEN** the worker transfer SHALL NOT prevent `manage_tech()`, `manage_upgrades()`, `manage_army()`, or `manage_attack()` from executing normally in the same step
+
+### Requirement: Bot executes pressure assessment during on_step
+The system SHALL call `assess_pressure()` on every `on_step` after feature extraction and before any manager methods. The resulting `PressureLevel` SHALL be stored as `self._pressure_level` and made available to all `manage_*` methods.
+
+#### Scenario: Pressure assessed before managers
+- **WHEN** `on_step` is called
+- **THEN** `assess_pressure()` SHALL run after feature extraction and before `manage_expansion()`, `manage_tech()`, and `manage_army()`
+
+### Requirement: Counter-driven tech tree
+`manage_tech()` SHALL build tech structures (Stargate, Twilight Council) when the top-3 recommended counters require them. The system SHALL check after Gateway and CyberCore prerequisites are met. One tech structure SHALL be built per step. Stargate SHALL take priority over Twilight Council.
+
+#### Scenario: Stargate for Phoenix counter
+- **WHEN** PHOENIX is in top-3 counters and no Stargate exists
+- **THEN** `manage_tech` SHALL build a Stargate
+
+#### Scenario: Twilight for Archon counter
+- **WHEN** ARCHON is in top-3 counters, no Twilight Council exists, and Stargate is not needed
+- **THEN** `manage_tech` SHALL build a Twilight Council
+
+### Requirement: Combined resource upgrade threshold
+The system SHALL use `minerals + vespene >= 500` as the resource gate for upgrade research in `manage_upgrades()`, replacing the minerals-only threshold. This SHALL apply to Forge, Twilight Council, and CyberCore upgrades.
+
+#### Scenario: Upgrade with gas-heavy economy
+- **WHEN** minerals = 120, vespene = 420, combined = 540
+- **THEN** the bot SHALL proceed with upgrade research

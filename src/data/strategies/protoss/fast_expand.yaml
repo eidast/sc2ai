@@ -23,9 +23,15 @@ scouting_adjustments:
 priority_formulas:
   STALKER: "gateway_units * 0.5 * (1 - own_ratio('STALKER'))"
   ZEALOT: "gateway_units * 0.4 * (1 - own_ratio('ZEALOT'))"
-  IMMORTAL: "robo_units * 0.7 * (1 - own_ratio('IMMORTAL'))"
-  VOIDRAY: "stargate_units * 0.6 * (1 - own_ratio('VOIDRAY'))"
-  PHOENIX: "stargate_units * 0.5 * (1 - own_ratio('PHOENIX'))"
+  IMMORTAL:
+    formula: "robo_units * 0.7 * (1 - own_ratio('IMMORTAL'))"
+    requires: ["ROBOTICSFACILITY"]
+  VOIDRAY:
+    formula: "stargate_units * 0.6 * (1 - own_ratio('VOIDRAY'))"
+    requires: ["STARGATE"]
+  PHOENIX:
+    formula: "stargate_units * 0.5 * (1 - own_ratio('PHOENIX'))"
+    requires: ["STARGATE"]
   GATEWAY: "gateway_units * (bases * 3 - has_structure('GATEWAY') * 2) / (bases * 3 + 1)"
   CYBERNETICSCORE: "gateway_units * (1 - has_structure('CYBERNETICSCORE'))"
   STARGATE: "stargate_units * (has_structure('CYBERNETICSCORE') * (1 - max(0, has_structure('STARGATE') - bases) / (bases + 1)))"

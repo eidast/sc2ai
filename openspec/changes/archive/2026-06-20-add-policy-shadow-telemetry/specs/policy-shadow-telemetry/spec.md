@@ -14,13 +14,13 @@ The system SHALL support explicit policy modes `heuristic` and `ml_shadow` for e
 ### Requirement: Shadow mode preserves heuristic control
 The system SHALL keep the heuristic policy as the only action-executing policy in both `heuristic` and `ml_shadow` modes.
 
-#### Scenario: Heuristic mode executes heuristic action
-- **WHEN** policy mode is `heuristic` and the heuristic selects an action
-- **THEN** the selected action SHALL be the heuristic action
+#### Scenario: Heuristic mode executes heuristic stack
+- **WHEN** policy mode is `heuristic` and the heuristic stack produces recommendations and overrides
+- **THEN** the selected policy SHALL be `heuristic` and gameplay SHALL continue through the existing heuristic stack
 
-#### Scenario: Shadow mode executes heuristic action
-- **WHEN** policy mode is `ml_shadow` and the heuristic selects an action
-- **THEN** the selected action SHALL be the heuristic action
+#### Scenario: Shadow mode executes heuristic stack
+- **WHEN** policy mode is `ml_shadow` and the heuristic stack produces recommendations and overrides
+- **THEN** the selected policy SHALL be `heuristic` and gameplay SHALL continue through the existing heuristic stack
 
 #### Scenario: Shadow prediction does not control gameplay
 - **WHEN** policy mode is `ml_shadow` and an ML shadow prediction exists
@@ -33,21 +33,41 @@ The system SHALL persist policy decision records to `reports/{match_id}/decision
 - **WHEN** a match starts and the report directory is initialized
 - **THEN** the system SHALL prepare `reports/{match_id}/decisions.jsonl` for policy decision records
 
-#### Scenario: Heuristic decision recorded
-- **WHEN** the heuristic policy evaluates a macro action
-- **THEN** the system SHALL append a JSON line containing time, step, policy mode, selected policy, decision state, heuristic action, and heuristic profile
+#### Scenario: Utility recommendation recorded
+- **WHEN** the utility engine evaluates a macro action
+- **THEN** the system SHALL append a JSON line containing time, step, policy mode, selected policy, strategic state, heuristic profile, and `utility.recommended_action`
+
+#### Scenario: Utility recommendation uses Action shape
+- **WHEN** `utility.recommended_action` is present
+- **THEN** it SHALL include JSON-serializable `type`, `target`, and `score` fields
 
 #### Scenario: Bias vector recorded when available
 - **WHEN** the heuristic bias calculator has a current bias vector
-- **THEN** the decision record SHALL include the bias vector as JSON-serializable numeric values
+- **THEN** the decision record SHALL include `utility.bias_vector` as JSON-serializable numeric values
+
+#### Scenario: Override context recorded
+- **WHEN** deterministic early-game logic or a safety fallback overrides or constrains the utility recommendation
+- **THEN** the decision record SHALL include `override_source` identifying the override source
+
+#### Scenario: No override context recorded
+- **WHEN** no deterministic build-order or safety override is known for the step
+- **THEN** the decision record SHALL include `override_source` as `none` or null
+
+#### Scenario: Executed intent recorded when known
+- **WHEN** the bot can identify a manager-level intent attempted during the step
+- **THEN** the decision record SHALL include `executed_intent` with JSON-serializable `type` and `target` fields
+
+#### Scenario: Executed intent may be absent
+- **WHEN** the bot cannot identify a manager-level intent for the step without low-level command tracing
+- **THEN** the decision record SHALL remain valid JSON and SHALL use null or omit `executed_intent`
 
 #### Scenario: Shadow prediction recorded when available
 - **WHEN** policy mode is `ml_shadow` and a shadow prediction is available
-- **THEN** the decision record SHALL include the shadow prediction and whether it agrees with the heuristic action
+- **THEN** the decision record SHALL include the shadow prediction and whether it agrees with the utility recommendation when comparable
 
 #### Scenario: Shadow prediction absent
 - **WHEN** policy mode is `ml_shadow` and no shadow prediction implementation is available
-- **THEN** the decision record SHALL still include the heuristic decision and SHALL remain valid JSON
+- **THEN** the decision record SHALL still include the heuristic utility recommendation and SHALL remain valid JSON
 
 ### Requirement: Policy metadata identifies experiment context
 The system SHALL include match-level policy metadata suitable for A/B analysis.

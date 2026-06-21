@@ -27,10 +27,18 @@ scouting_adjustments:
 priority_formulas:
   STALKER: "gateway_units * 0.5 * (1 - own_ratio('STALKER'))"
   ZEALOT: "gateway_units * 0.3 * (1 - own_ratio('ZEALOT'))"
-  PHOENIX: "stargate_units * 0.7 * (1 - own_ratio('PHOENIX'))"
-  VOIDRAY: "stargate_units * 0.9 * (1 - own_ratio('VOIDRAY'))"
-  ORACLE: "stargate_units * 0.5 * (has_enemy ? (1 - own_ratio('ORACLE')) : 0.1)"
-  CARRIER: "stargate_units * 0.8 * air_upgrades * (game_time > 600 ? (1 - own_ratio('CARRIER')) : 0.1)"
+  PHOENIX:
+    formula: "stargate_units * 0.7 * (1 - own_ratio('PHOENIX'))"
+    requires: ["STARGATE"]
+  VOIDRAY:
+    formula: "stargate_units * 0.9 * (1 - own_ratio('VOIDRAY'))"
+    requires: ["STARGATE"]
+  ORACLE:
+    formula: "stargate_units * 0.5 * (has_enemy ? (1 - own_ratio('ORACLE')) : 0.1)"
+    requires: ["STARGATE"]
+  CARRIER:
+    formula: "stargate_units * 0.8 * air_upgrades * (game_time > 600 ? (1 - own_ratio('CARRIER')) : 0.1)"
+    requires: ["STARGATE"]
   GATEWAY: "(gateway_units + (1 - robo_units) * 0.2) * (bases * 3 - has_structure('GATEWAY') * 2) / (bases * 3 + 1)"
   CYBERNETICSCORE: "gateway_units * (1 - has_structure('CYBERNETICSCORE'))"
   STARGATE: "stargate_units * (1 - max(0, has_structure('STARGATE') - bases) / (bases + 1)) * has_structure('CYBERNETICSCORE')"

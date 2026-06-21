@@ -144,6 +144,9 @@ def evaluate_decision(
         if phase["name"] == "desperate" and supply_used >= supply_min:
             return Decision(DecisionState.ATTACK, "desperate phase — all-in")
 
+        if time_in_state >= 60 and army_count >= 8 and army_value_ratio > 0.8:
+            return Decision(DecisionState.ATTACK, "hoard timeout — attack")
+
         return Decision(DecisionState.DEFEND, "no attack condition met")
 
     if current_state == DecisionState.ATTACK:

@@ -27,10 +27,18 @@ scouting_adjustments:
 priority_formulas:
   STALKER: "gateway_units * 0.5 * (1 - own_ratio('STALKER'))"
   ZEALOT: "gateway_units * 0.4 * (1 - own_ratio('ZEALOT'))"
-  IMMORTAL: "robo_units * 0.8 * (1 - own_ratio('IMMORTAL'))"
-  COLOSSUS: "robo_units * 0.7 * ground_upgrades * (1 - own_ratio('COLOSSUS'))"
-  DISRUPTOR: "robo_units * 0.6 * ground_upgrades * (1 - own_ratio('DISRUPTOR'))"
-  OBSERVER: "robo_units * 0.3 * (has_enemy ? 0.5 : 0.1)"
+  IMMORTAL:
+    formula: "robo_units * 0.8 * (1 - own_ratio('IMMORTAL'))"
+    requires: ["ROBOTICSFACILITY"]
+  COLOSSUS:
+    formula: "robo_units * 0.7 * ground_upgrades * (1 - own_ratio('COLOSSUS'))"
+    requires: ["ROBOTICSFACILITY"]
+  DISRUPTOR:
+    formula: "robo_units * 0.6 * ground_upgrades * (1 - own_ratio('DISRUPTOR'))"
+    requires: ["ROBOTICSFACILITY"]
+  OBSERVER:
+    formula: "robo_units * 0.3 * (has_enemy ? 0.5 : 0.1)"
+    requires: ["ROBOTICSFACILITY"]
   GATEWAY: "(gateway_units + (1 - robo_units) * 0.2) * (bases * 3 - has_structure('GATEWAY') * 2) / (bases * 3 + 1)"
   CYBERNETICSCORE: "gateway_units * (1 - has_structure('CYBERNETICSCORE'))"
   ROBOTICSFACILITY: "robo_units * (has_structure('CYBERNETICSCORE') * (1 - max(0, has_structure('ROBOTICSFACILITY') - bases) / (bases + 1)))"

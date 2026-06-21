@@ -1,7 +1,7 @@
 """Integration tests: verify engine produces actions and FSM overrides work."""
 
 import pytest
-from src.strategies.types import Action, ActionType, StrategyProfile, MetaParams, ScoutingAdjustment
+from src.strategies.types import Action, ActionType, StrategyProfile, MetaParams, ScoutingAdjustment, FormulaEntry
 from src.strategies.bias_calculator import BiasCalculator
 from src.strategies.priority_engine import PriorityEngine
 from src.strategies.loader import StrategyLoader
@@ -134,6 +134,6 @@ def _make_scouting_profile() -> StrategyProfile:
                 biases={"stargate_units": 0.3},
             ),
         ],
-        priority_formulas={"STALKER": "0.5"},
+        priority_formulas={"STALKER": FormulaEntry(formula="0.5")},
         meta=MetaParams(bias_speed=1.0),
     )

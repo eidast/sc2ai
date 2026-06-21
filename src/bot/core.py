@@ -5,12 +5,13 @@ from datetime import datetime
 from sc2.bot_ai import BotAI
 from sc2.ids.unit_typeid import UnitTypeId
 from sc2.ids.upgrade_id import UpgradeId
+from sc2.ids.ability_id import AbilityId
 from sc2.unit import Unit
 from sc2.units import Units
 from sc2.position import Point2
 from sc2.data import Result
 
-from src.bot.strategy import BuildPhase, CameraMode, MAX_SATURATION_RATIO, BASE_MINERAL_RADIUS, THREAT_RANGE, ENGAGE_RANGE, GATEWAY_MINERAL_BASELINE, GATEWAY_PER_BASE, GATEWAY_MINERAL_FLOAT_THRESHOLD, GATEWAY_MINERAL_FLOAT_EXTRA, MAX_GATEWAYS, FORGE_MINERAL_THRESHOLD
+from src.bot.strategy import BuildPhase, CameraMode, MAX_SATURATION_RATIO, BASE_MINERAL_RADIUS, THREAT_RANGE, ENGAGE_RANGE, GATEWAY_MINERAL_BASELINE, GATEWAY_PER_BASE, GATEWAY_MINERAL_FLOAT_THRESHOLD, GATEWAY_MINERAL_FLOAT_EXTRA, MAX_GATEWAYS, FORGE_MINERAL_THRESHOLD, UPGRADE_RESOURCE_THRESHOLD
 
 from src.ml.observation import extract_features, extract_building_inference, extract_eco_inference
 from src.ml.events import detect_events
@@ -28,7 +29,8 @@ from src.bot.upgrades import (
 )
 from src.bot.decision import evaluate_decision, DecisionState, SURRENDER_MIN_TIME, SURRENDER_ARMY_VALUE_RATIO, SURRENDER_WORKER_MIN, SURRENDER_FOG_ARMY_VALUE_RATIO, VICTORY_MIN_TIME, VICTORY_ENEMY_GONE_SECONDS, VICTORY_MIN_ARMY
 
-from src.strategies.types import Action, ActionType
+from src.bot.pressure import PressureLevel, assess_pressure, pressure_expand_saturation, pressure_expand_mineral_bank, pressure_gateway_bonus, pressure_gateway_float_extra
+from src.strategies.types import Action, ActionType, StrategyProfile
 from src.strategies.bias_calculator import BiasCalculator
 from src.strategies.priority_engine import PriorityEngine
 from src.strategies.loader import StrategyLoader
@@ -37,9 +39,12 @@ from src.strategies.loader import StrategyLoader
 class MyBot(BotAI):
     MAX_WORKERS = 70
     ATTACK_SUPPLY = 200
+    POLICY_MODES = {"heuristic", "ml_shadow"}
 
-    def __init__(self, log_interval: int = 22, surrender_enabled: bool = False, fog_enabled: bool = False, strategy_profile: str | None = None, opponent_difficulty: str = "Medium", opponent_race: str = "Terran", opponent_count: int = 1):
+    def __init__(self, log_interval: int = 22, surrender_enabled: bool = False, fog_enabled: bool = False, strategy_profile: str | None = None, opponent_difficulty: str = "Medium", opponent_race: str = "Terran", opponent_count: int = 1, policy_mode: str = "heuristic", experiment_id: str | None = None, model_name: str | None = None, model_version: str | None = None, shadow_profiles: list[str] | None = None):
         super().__init__()
+        if policy_mode not in self.POLICY_MODES:
+            raise ValueError(f"Unsupported policy_mode: {policy_mode}")
         self.logger = setup_logger()
         self.log_interval = log_interval
         self.surrender_enabled = surrender_enabled
@@ -48,6 +53,10 @@ class MyBot(BotAI):
         self.opponent_difficulty = opponent_difficulty
         self.opponent_race = opponent_race
         self.opponent_count = opponent_count
+        self.policy_mode = policy_mode
+        self.experiment_id = experiment_id
+        self.model_name = model_name
+        self.model_version = model_version
         self._decision_state = DecisionState.DEFEND
         self._state_start_time: float = 0.0
         self._surrender_conditions_start: float | None = None
@@ -57,6 +66,7 @@ class MyBot(BotAI):
         self._match_id: str | None = None
         self._features_file: str | None = None
         self._events_file: str | None = None
+        self._decisions_file: str | None = None
         self._prev_features: dict | None = None
         self._scout_tag: int | None = None
         self._scout_waypoints: list[tuple[float, float]] = []
@@ -69,6 +79,8 @@ class MyBot(BotAI):
         self._worker_scout_tag: int | None = None
         self._worker_scout_waypoint_index: int = 0
         self._worker_scout_active = False
+        self._pressure_level: PressureLevel = PressureLevel.NONE
+        self._pressure_level_start: float = 0.0
 
         import os as _os
         _data_dir = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.dirname(__file__))), "src", "data", "strategies")
@@ -79,6 +91,29 @@ class MyBot(BotAI):
         self._last_action: Action | None = None
         self._early_game_phase: int = 0
         self._early_game_phase_start: float = 0.0
+        self._last_override_source: str | None = None
+        self._last_executed_intent: dict | None = None
+        self._shadow_profiles: list[tuple[str, StrategyProfile]] = []
+        self._shadow_bias_calculators: list[BiasCalculator] = []
+        self._shadow_priority_engines: list[PriorityEngine] = []
+        self._last_shadow_predictions: list[dict] = []
+        self._shadow_last_actions: list[Action | None] = []
+
+        if policy_mode == "ml_shadow":
+            if shadow_profiles:
+                for name in shadow_profiles:
+                    profile = self._strategy_loader.load(f"protoss/{name}.yaml")
+                    self._shadow_profiles.append((name, profile))
+                    self._shadow_bias_calculators.append(BiasCalculator(profile))
+                    self._shadow_priority_engines.append(PriorityEngine(profile))
+                self._shadow_last_actions = [None] * len(shadow_profiles)
+            else:
+                available = self._strategy_loader.load_all("protoss")
+                available_names = sorted(p.name for p in available if p.name != getattr(self._active_profile, "name", ""))
+                raise ValueError(
+                    f"policy_mode 'ml_shadow' requires at least one --shadow-profile. "
+                    f"Available profiles: {', '.join(available_names)}"
+                )
 
     async def on_start(self):
         self._decision_state = DecisionState.DEFEND
@@ -96,17 +131,15 @@ class MyBot(BotAI):
         self.logger.info("Bot started — race: %s, map: %s", self.race, self.game_info.map_name)
 
     async def on_step(self, iteration: int):
+        self._last_shadow_predictions = []
         if iteration == 0:
             await self.chat_send("En Taro Tassadar! (Protoss macro bot online)")
             self._match_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-            reports_dir = os.path.join(
+            reports_root = os.path.join(
                 os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
                 "reports",
-                self._match_id,
             )
-            os.makedirs(reports_dir, exist_ok=True)
-            self._features_file = os.path.join(reports_dir, "features.jsonl")
-            self._events_file = os.path.join(reports_dir, "events.jsonl")
+            self._initialize_report_files(reports_root, self._match_id)
 
         if not self._surrender_fired and hasattr(self, "state") and self.state.player_result:
             for pr in self.state.player_result:
@@ -146,6 +179,11 @@ class MyBot(BotAI):
         events = detect_events(self, features, self._prev_features, iteration)
         self._prev_features = features
         self._enemy_push_active = any(e.type == "enemy_push" for e in events)
+
+        features["enemy_push_active"] = self._enemy_push_active
+        self._pressure_level, self._pressure_level_start = assess_pressure(
+            features, self.time, self._pressure_level, self._pressure_level_start
+        )
 
         enemy_race_name = self.enemy_race.name.title() if hasattr(self, "enemy_race") else None
         time_in_state = self.time - self._state_start_time
@@ -250,7 +288,26 @@ class MyBot(BotAI):
                     features,
                     own_composition=features.get("our_army_composition", {}),
                     structures=features.get("our_structures", {}),
+                    prev_action=self._last_action,
                 )
+
+            for i, (name, _) in enumerate(self._shadow_profiles):
+                shadow_bias = self._shadow_bias_calculators[i]
+                shadow_engine = self._shadow_priority_engines[i]
+                scout_dict = self._scout_metadata.to_dict()
+                shadow_bias.update(features, scout_dict)
+                shadow_action = shadow_engine.evaluate(
+                    shadow_bias.bias_vector,
+                    features,
+                    own_composition=features.get("our_army_composition", {}),
+                    structures=features.get("our_structures", {}),
+                    prev_action=self._shadow_last_actions[i] if i < len(self._shadow_last_actions) else None,
+                )
+                self._shadow_last_actions[i] = shadow_action
+                self._last_shadow_predictions.append({
+                    "profile": name,
+                    "recommended_action": self._serialize_action(shadow_action),
+                })
 
         action = self._last_action if self._last_action and self._decision_state not in (DecisionState.SURRENDER, DecisionState.WON) else None
 
@@ -266,6 +323,9 @@ class MyBot(BotAI):
         await self.manage_scout()
         await self.manage_attack()
         await self.manage_camera()
+
+        if self._decisions_file:
+            self._write_decision_record(iteration, features, self._last_action)
 
     async def on_end(self, game_result):
         result_name = str(game_result).replace("Result.", "").lower()
@@ -288,6 +348,7 @@ class MyBot(BotAI):
                 "opponent_difficulty": self.opponent_difficulty,
                 "opponent_count": self.opponent_count,
                 "result": result_name,
+                "policy": self._build_policy_metadata(),
             }
             try:
                 generate_report(match_dir, self._match_id, features, events, bot_info)
@@ -314,8 +375,79 @@ class MyBot(BotAI):
         self.logger.info("BUILD %s — afford:True placement:True worker:%s", unit_type_id.name, worker.tag)
         return True
 
+    def _initialize_report_files(self, reports_root: str, match_id: str) -> None:
+        reports_dir = os.path.join(reports_root, match_id)
+        os.makedirs(reports_dir, exist_ok=True)
+        self._features_file = os.path.join(reports_dir, "features.jsonl")
+        self._events_file = os.path.join(reports_dir, "events.jsonl")
+        self._decisions_file = os.path.join(reports_dir, "decisions.jsonl")
+        open(self._decisions_file, "a").close()
+
+    @staticmethod
+    def _serialize_action(action: Action | None) -> dict | None:
+        if action is None:
+            return None
+        return {
+            "type": action.type.name,
+            "target": action.target,
+            "score": action.score,
+        }
+
+    def _build_policy_metadata(self) -> dict:
+        profile = self.strategy_profile_name or getattr(self._active_profile, "name", "unknown")
+        metadata = {
+            "mode": self.policy_mode,
+            "selected_policy": "heuristic",
+            "heuristic_profile": profile or "unknown",
+            "model_name": self.model_name,
+            "model_version": self.model_version,
+            "experiment_id": self.experiment_id,
+            "code_version": "unknown",
+        }
+        if self.policy_mode == "ml_shadow" and self._shadow_profiles:
+            metadata["shadow_profiles"] = [name for name, _ in self._shadow_profiles]
+        return metadata
+
+    def _gateway_count(self) -> int:
+        return (self.structures(UnitTypeId.GATEWAY).amount +
+                self.structures(UnitTypeId.WARPGATE).amount)
+
+    def _build_decision_record(self, iteration: int, features: dict, action: Action | None) -> dict:
+        bias_vector = {}
+        if self._bias_calculator is not None:
+            bias_vector = self._bias_calculator.bias_vector
+
+        profile = self.strategy_profile_name or getattr(self._active_profile, "name", "unknown")
+        state = getattr(self._decision_state, "name", str(self._decision_state))
+        return {
+            "time": features.get("game_time_seconds", getattr(self, "time", 0)),
+            "step": iteration,
+            "policy_mode": self.policy_mode,
+            "selected_policy": "heuristic",
+            "strategic_state": state,
+            "heuristic_profile": profile or "unknown",
+            "early_game_phase": self._early_game_phase,
+            "pressure_level": self._pressure_level.name,
+            "override_source": self._last_override_source or "none",
+            "executed_intent": self._last_executed_intent,
+            "utility": {
+                "recommended_action": self._serialize_action(action),
+                "bias_vector": bias_vector,
+            },
+            "shadow_predictions": self._last_shadow_predictions,
+        }
+
+    def _write_decision_record(self, iteration: int, features: dict, action: Action | None) -> None:
+        if not self._decisions_file:
+            return
+        with open(self._decisions_file, "a") as f:
+            f.write(json.dumps(self._build_decision_record(iteration, features, action)) + "\n")
+
     async def manage_early_game(self):
-        if self.time >= 90:
+        self._last_override_source = None
+        self._last_executed_intent = None
+
+        if self._early_game_phase >= 5:
             return
 
         EARLY_PHASE_TIMEOUT = 15.0
@@ -332,6 +464,8 @@ class MyBot(BotAI):
         if self._early_game_phase == 0:
             if self.supply_left < 4 and self.structures(UnitTypeId.PYLON).amount < 1:
                 if not self.already_pending(UnitTypeId.PYLON):
+                    self._last_override_source = "early_game_build_order"
+                    self._last_executed_intent = {"type": "BUILD_STRUCTURE", "target": "PYLON"}
                     await self._build_if_able(UnitTypeId.PYLON)
                 return
             self._early_game_phase = 1
@@ -339,6 +473,8 @@ class MyBot(BotAI):
 
         if self._early_game_phase == 1:
             if self.structures(UnitTypeId.GATEWAY).amount == 0:
+                self._last_override_source = "early_game_build_order"
+                self._last_executed_intent = {"type": "BUILD_STRUCTURE", "target": "GATEWAY"}
                 if await self._build_if_able(UnitTypeId.GATEWAY):
                     return
                 if self.already_pending(UnitTypeId.GATEWAY):
@@ -348,6 +484,8 @@ class MyBot(BotAI):
 
         if self._early_game_phase == 2:
             if self.structures(UnitTypeId.CYBERNETICSCORE).amount == 0:
+                self._last_override_source = "early_game_build_order"
+                self._last_executed_intent = {"type": "BUILD_STRUCTURE", "target": "CYBERNETICSCORE"}
                 if await self._build_if_able(UnitTypeId.CYBERNETICSCORE):
                     return
                 if self.already_pending(UnitTypeId.CYBERNETICSCORE):
@@ -356,11 +494,24 @@ class MyBot(BotAI):
             self._early_game_phase_start = self.time
 
         if self._early_game_phase == 3:
+            if self._pressure_level.value <= PressureLevel.LOW.value and self.townhalls.amount < 2:
+                self._last_override_source = "early_game_build_order"
+                self._last_executed_intent = {"type": "BUILD_STRUCTURE", "target": "NEXUS"}
+                if await self._build_if_able(UnitTypeId.NEXUS):
+                    return
+                if self.already_pending(UnitTypeId.NEXUS):
+                    return
+            self._early_game_phase = 4
+            self._early_game_phase_start = self.time
+
+        if self._early_game_phase == 4:
             cyber_cores = self.structures(UnitTypeId.CYBERNETICSCORE).ready
             if cyber_cores.amount > 0 and not self.already_pending_upgrade(UpgradeId.WARPGATERESEARCH):
                 if self.can_afford(UpgradeId.WARPGATERESEARCH):
+                    self._last_override_source = "early_game_build_order"
+                    self._last_executed_intent = {"type": "RESEARCH_UPGRADE", "target": "WARPGATERESEARCH"}
                     cyber_cores.first.research(UpgradeId.WARPGATERESEARCH)
-                    self._early_game_phase = 4
+                    self._early_game_phase = 5
 
     async def manage_probes(self):
         nexus_list = self.townhalls.ready
@@ -385,6 +536,8 @@ class MyBot(BotAI):
                     if abs(nexus.position.x - nx) < 1 and abs(nexus.position.y - ny) < 1:
                         if nexus.is_idle:
                             nexus.train(UnitTypeId.PROBE)
+                            if nexus.energy >= 50:
+                                nexus(AbilityId.EFFECT_CHRONOBOOST, nexus)
                             return
 
         await self.manage_worker_transfer(bases, oversaturated, undersaturated)
@@ -501,7 +654,10 @@ class MyBot(BotAI):
             await self.build(UnitTypeId.PYLON, near=position)
 
     async def manage_gas(self):
-        if self.structures(UnitTypeId.GATEWAY).amount == 0 and self.gas_buildings.amount >= 1:
+        if self.structures(UnitTypeId.PYLON).amount == 0:
+            return
+
+        if self._gateway_count() == 0 and self.gas_buildings.amount >= 1:
             await self._assign_gas_workers()
             return
 
@@ -545,7 +701,13 @@ class MyBot(BotAI):
         if self.already_pending(UnitTypeId.NEXUS):
             return
 
-        if self.minerals > 400 and self.can_afford(UnitTypeId.NEXUS):
+        sat_threshold = pressure_expand_saturation(self._pressure_level)
+        bank_threshold = pressure_expand_mineral_bank(self._pressure_level)
+
+        if sat_threshold is None or bank_threshold is None:
+            return
+
+        if self.minerals > bank_threshold and self.can_afford(UnitTypeId.NEXUS):
             await self.expand_now(building=UnitTypeId.NEXUS, max_distance=0)
             return
 
@@ -554,7 +716,7 @@ class MyBot(BotAI):
 
         for nexus in self.townhalls.ready:
             _, _, ratio = self._get_base_saturation(nexus)
-            if ratio < MAX_SATURATION_RATIO:
+            if ratio < sat_threshold:
                 return
 
         await self.expand_now(building=UnitTypeId.NEXUS, max_distance=0)
@@ -563,15 +725,46 @@ class MyBot(BotAI):
         if not self.townhalls.ready:
             return
 
-        if self.structures(UnitTypeId.GATEWAY).amount == 0:
+        if self._gateway_count() == 0:
             if self.time >= 120:
                 self.logger.warning("NO GATEWAY at t=%.1f — emergency build", self.time)
+                self._last_override_source = "gateway_emergency_fallback"
+                self._last_executed_intent = {"type": "BUILD_STRUCTURE", "target": "GATEWAY"}
             await self._build_if_able(UnitTypeId.GATEWAY)
             return
 
         if self.structures(UnitTypeId.CYBERNETICSCORE).amount == 0:
+            self._last_override_source = "tech_prerequisite_fallback"
+            self._last_executed_intent = {"type": "BUILD_STRUCTURE", "target": "CYBERNETICSCORE"}
             await self._build_if_able(UnitTypeId.CYBERNETICSCORE)
             return
+
+        counters = self._last_recommended_counters
+        top_3 = list(counters.keys())[:3] if counters else []
+
+        _STARGATE_COUNTER_NAMES = {"VOIDRAY", "PHOENIX", "CARRIER", "TEMPEST"}
+        _TWILIGHT_COUNTER_NAMES = {"ARCHON"}
+
+        if any(c in _STARGATE_COUNTER_NAMES for c in top_3):
+            if self.structures(UnitTypeId.STARGATE).amount == 0:
+                self._last_override_source = "counter_driven_tech"
+                self._last_executed_intent = {"type": "BUILD_STRUCTURE", "target": "STARGATE"}
+                await self._build_if_able(UnitTypeId.STARGATE)
+                return
+
+        if any(c in _TWILIGHT_COUNTER_NAMES for c in top_3):
+            if self.structures(UnitTypeId.TWILIGHTCOUNCIL).amount == 0:
+                self._last_override_source = "counter_driven_tech"
+                self._last_executed_intent = {"type": "BUILD_STRUCTURE", "target": "TWILIGHTCOUNCIL"}
+                await self._build_if_able(UnitTypeId.TWILIGHTCOUNCIL)
+                return
+
+        if self.structures(UnitTypeId.FORGE).amount == 0:
+            if self.minerals + self.vespene >= UPGRADE_RESOURCE_THRESHOLD:
+                self._last_override_source = "counter_driven_tech"
+                self._last_executed_intent = {"type": "BUILD_STRUCTURE", "target": "FORGE"}
+                await self._build_if_able(UnitTypeId.FORGE)
+                return
 
         if action is not None and action.type == ActionType.BUILD_STRUCTURE:
             target_name = action.target
@@ -587,13 +780,15 @@ class MyBot(BotAI):
             if self.can_afford(UpgradeId.WARPGATERESEARCH) and not self.already_pending_upgrade(UpgradeId.WARPGATERESEARCH):
                 cyber_cores.ready.first.research(UpgradeId.WARPGATERESEARCH)
 
-        gateways = self.structures(UnitTypeId.GATEWAY)
-        target = GATEWAY_MINERAL_BASELINE + max(0, self.townhalls.amount - 1) * GATEWAY_PER_BASE
+        gateway_count = self._gateway_count()
+        target = (GATEWAY_MINERAL_BASELINE
+                  + pressure_gateway_bonus(self._pressure_level)
+                  + max(0, self.townhalls.amount - 1) * GATEWAY_PER_BASE)
         if self.minerals > GATEWAY_MINERAL_FLOAT_THRESHOLD:
-            target += GATEWAY_MINERAL_FLOAT_EXTRA
+            target += pressure_gateway_float_extra(self._pressure_level)
         target_gateways = min(target, MAX_GATEWAYS)
 
-        if gateways.amount < target_gateways:
+        if gateway_count < target_gateways:
             if not self.already_pending(UnitTypeId.GATEWAY):
                 await self._build_if_able(UnitTypeId.GATEWAY)
 
@@ -620,7 +815,7 @@ class MyBot(BotAI):
                         forge.research(tid)
                         return
 
-        if self.minerals < FORGE_MINERAL_THRESHOLD:
+        if self.minerals + self.vespene < UPGRADE_RESOURCE_THRESHOLD:
             return
 
         forges = self.structures(UnitTypeId.FORGE)
@@ -792,53 +987,72 @@ class MyBot(BotAI):
                 engine_unit = getattr(UnitTypeId, target_name)
 
         counters = self._last_recommended_counters
+        top_3 = list(counters.keys())[:3] if counters else []
 
-        primary_unit = engine_unit if engine_unit is not None else UnitTypeId.STALKER
-        secondary_unit = UnitTypeId.ZEALOT
+        _GATEWAY_COUNTERS = {"ZEALOT", "STALKER", "ADEPT", "ARCHON"}
+        _ROBO_COUNTERS = {"IMMORTAL", "COLOSSUS", "DISRUPTOR"}
+        _STARGATE_COUNTERS = {"VOIDRAY", "PHOENIX", "CARRIER", "TEMPEST"}
 
-        if counters and engine_unit is None:
-            top_counter = next(iter(counters), None)
-            if top_counter == "IMMORTAL":
-                primary_unit = UnitTypeId.IMMORTAL
-                secondary_unit = UnitTypeId.STALKER
-            elif top_counter == "ZEALOT":
-                primary_unit = UnitTypeId.ZEALOT
-                secondary_unit = UnitTypeId.STALKER
+        _COUNTER_TO_UNIT = {
+            "ZEALOT": UnitTypeId.ZEALOT, "STALKER": UnitTypeId.STALKER,
+            "ADEPT": UnitTypeId.ADEPT, "ARCHON": UnitTypeId.ARCHON,
+            "IMMORTAL": UnitTypeId.IMMORTAL, "COLOSSUS": UnitTypeId.COLOSSUS,
+            "DISRUPTOR": UnitTypeId.DISRUPTOR,
+            "VOIDRAY": UnitTypeId.VOIDRAY, "PHOENIX": UnitTypeId.PHOENIX,
+            "CARRIER": UnitTypeId.CARRIER, "TEMPEST": UnitTypeId.TEMPEST,
+        }
+
+        def _best_counter(counter_set, default):
+            for c in top_3:
+                if c in counter_set and c in _COUNTER_TO_UNIT:
+                    return _COUNTER_TO_UNIT[c]
+            return default
+
+        if engine_unit is not None:
+            gateway_unit = engine_unit
+            robo_unit = engine_unit if engine_unit in _COUNTER_TO_UNIT.values() and any(
+                k in _ROBO_COUNTERS for k, v in _COUNTER_TO_UNIT.items() if v == engine_unit
+            ) else UnitTypeId.IMMORTAL
+            sg_unit = engine_unit if engine_unit in _COUNTER_TO_UNIT.values() and any(
+                k in _STARGATE_COUNTERS for k, v in _COUNTER_TO_UNIT.items() if v == engine_unit
+            ) else UnitTypeId.VOIDRAY
+        else:
+            gateway_unit = _best_counter(_GATEWAY_COUNTERS, UnitTypeId.STALKER)
+            robo_unit = _best_counter(_ROBO_COUNTERS, UnitTypeId.IMMORTAL)
+            sg_unit = _best_counter(_STARGATE_COUNTERS, UnitTypeId.VOIDRAY)
+
+        gw_default = UnitTypeId.ZEALOT if gateway_unit == UnitTypeId.STALKER else UnitTypeId.STALKER
 
         for gateway in self.structures(UnitTypeId.GATEWAY).ready.idle:
-            if self.can_afford(primary_unit) and self.supply_left >= 2:
-                gateway.train(primary_unit)
-            elif self.can_afford(secondary_unit) and self.supply_left >= 2:
-                gateway.train(secondary_unit)
+            if self.can_afford(gateway_unit) and self.supply_left >= 2:
+                gateway.train(gateway_unit)
+            elif self.can_afford(gw_default) and self.supply_left >= 2:
+                gateway.train(gw_default)
 
         for warp_gate in self.structures(UnitTypeId.WARPGATE).ready.idle:
-            if self.can_afford(primary_unit) and self.supply_left >= 2:
+            if self.can_afford(gateway_unit) and self.supply_left >= 2:
                 placement = await self.find_placement(
-                    primary_unit, warp_gate.position, placement_step=3
+                    gateway_unit, warp_gate.position, placement_step=3
                 )
                 if placement:
-                    warp_gate.warp_in(primary_unit, placement)
-            elif self.can_afford(secondary_unit) and self.supply_left >= 2:
+                    warp_gate.warp_in(gateway_unit, placement)
+            elif self.can_afford(gw_default) and self.supply_left >= 2:
                 placement = await self.find_placement(
-                    secondary_unit, warp_gate.position, placement_step=3
+                    gw_default, warp_gate.position, placement_step=3
                 )
                 if placement:
-                    warp_gate.warp_in(secondary_unit, placement)
+                    warp_gate.warp_in(gw_default, placement)
 
-        _ROBO_UNITS = [UnitTypeId.IMMORTAL, UnitTypeId.COLOSSUS, UnitTypeId.DISRUPTOR, UnitTypeId.OBSERVER, UnitTypeId.WARPPRISM]
-        robo_unit = engine_unit if engine_unit in _ROBO_UNITS else UnitTypeId.IMMORTAL
         for robo in self.structures(UnitTypeId.ROBOTICSFACILITY).ready.idle:
             if self.can_afford(robo_unit) and self.supply_left >= 3:
                 robo.train(robo_unit)
-            elif robo_unit != UnitTypeId.IMMORTAL and self.can_afford(UnitTypeId.IMMORTAL) and self.supply_left >= 3:
+            elif self.can_afford(UnitTypeId.IMMORTAL) and self.supply_left >= 3:
                 robo.train(UnitTypeId.IMMORTAL)
 
-        _STARGATE_UNITS = [UnitTypeId.VOIDRAY, UnitTypeId.PHOENIX, UnitTypeId.ORACLE, UnitTypeId.CARRIER, UnitTypeId.TEMPEST]
-        sg_unit = engine_unit if engine_unit in _STARGATE_UNITS else UnitTypeId.VOIDRAY
         for stargate in self.structures(UnitTypeId.STARGATE).ready.idle:
             if self.can_afford(sg_unit) and self.supply_left >= 2:
                 stargate.train(sg_unit)
-            elif sg_unit != UnitTypeId.VOIDRAY and self.can_afford(UnitTypeId.VOIDRAY) and self.supply_left >= 2:
+            elif self.can_afford(UnitTypeId.VOIDRAY) and self.supply_left >= 2:
                 stargate.train(UnitTypeId.VOIDRAY)
 
     async def manage_attack(self):
@@ -918,23 +1132,43 @@ class MyBot(BotAI):
                 threatened.append((nexus, nearby_enemy, score))
 
         if not threatened:
-            rally = self._compute_defensive_rally()
-            for unit in army.idle:
-                if unit.position.distance_to(rally) > 5:
-                    unit.move(rally)
-            return
-
-        threatened.sort(key=lambda x: x[2], reverse=True)
-        nexus, enemies, _ = threatened[0]
-
-        for unit in army.idle:
-            dist = unit.position.distance_to(nexus.position)
-            if dist > ENGAGE_RANGE:
-                unit.move(nexus.position)
+            if army.amount >= 8:
+                target = getattr(self, "enemy_start_locations", [None])[0]
+                if target is None:
+                    target = self._compute_defensive_rally()
             else:
-                target = enemies.closest_to(unit.position)
-                if target:
-                    unit.attack(target)
+                target = self._compute_defensive_rally()
+            for unit in army.idle:
+                if unit.position.distance_to(target) > 5:
+                    unit.move(target)
+        else:
+            threatened.sort(key=lambda x: x[2], reverse=True)
+            nexus, enemies, _ = threatened[0]
+
+            for unit in army.idle:
+                dist = unit.position.distance_to(nexus.position)
+                if dist > ENGAGE_RANGE:
+                    unit.move(nexus.position)
+                else:
+                    target_unit = enemies.closest_to(unit.position)
+                    if target_unit:
+                        unit.attack(target_unit)
+
+        for unit in army:
+            nearby_enemy = self.enemy_units.closer_than(ENGAGE_RANGE, unit.position)
+            if not nearby_enemy:
+                continue
+            hp_ratio = unit.health / max(unit.health_max, 1)
+            if hp_ratio < 0.3 and unit.shield == 0:
+                nearest_nexus = self.townhalls.closest_to(unit.position)
+                unit.move(nearest_nexus.position)
+                continue
+            if unit.type_id == UnitTypeId.STALKER:
+                for enemy in nearby_enemy:
+                    if enemy.ground_range < 2:
+                        away = unit.position.towards(enemy.position, -3)
+                        unit.move(away)
+                        break
 
     def _compute_defensive_rally(self):
         if len(self.townhalls) >= 2:

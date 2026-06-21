@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch, PropertyMock
 
@@ -5,15 +6,18 @@ from sc2.ids.unit_typeid import UnitTypeId
 from sc2.ids.upgrade_id import UpgradeId
 
 from src.bot.core import MyBot
+from src.bot.pressure import PressureLevel
 from src.strategies.types import Action, ActionType
 
 
 class FakeStructures:
-    def __init__(self, gateways=0, gateways_ready=0, cyber_cores=0, cyber_cores_ready=0):
+    def __init__(self, gateways=0, gateways_ready=0, warpgates=0, cyber_cores=0, cyber_cores_ready=0, pylons=0):
         self._gateways = gateways
         self._gateways_ready = gateways_ready
+        self._warpgates = warpgates
         self._cyber_cores = cyber_cores
         self._cyber_cores_ready = cyber_cores_ready
+        self._pylons = pylons
 
     def _make_ready(self, amt):
         obj = SimpleNamespace(amount=amt, idle=[])
@@ -25,9 +29,15 @@ class FakeStructures:
         if unit_type == UnitTypeId.GATEWAY:
             amt = self._gateways
             rdy = self._gateways_ready
+        elif unit_type == UnitTypeId.WARPGATE:
+            amt = self._warpgates
+            rdy = 0
         elif unit_type == UnitTypeId.CYBERNETICSCORE:
             amt = self._cyber_cores
             rdy = self._cyber_cores_ready
+        elif unit_type == UnitTypeId.PYLON:
+            amt = self._pylons
+            rdy = 0
         else:
             amt = 0
             rdy = 0
@@ -79,10 +89,14 @@ def _make_bot(**overrides):
     bot.structures = FakeStructures(
         gateways=overrides.get("gateways", 0),
         gateways_ready=overrides.get("gateways_ready", 0),
+        warpgates=overrides.get("warpgates", 0),
         cyber_cores=overrides.get("cyber_cores", 0),
         cyber_cores_ready=overrides.get("cyber_cores_ready", 0),
+        pylons=overrides.get("pylons", 1),
     )
     bot.can_afford = MagicMock(return_value=True)
+    bot._pressure_level = overrides.get("pressure_level", PressureLevel.NONE)
+    bot._pressure_level_start = overrides.get("pressure_level_start", 0.0)
     bot.already_pending = MagicMock(return_value=False)
     bot.already_pending_upgrade = MagicMock(return_value=False)
     bot.find_placement = AsyncMock(return_value=SimpleNamespace(x=55.0, y=55.0))
@@ -135,9 +149,11 @@ class TestManageEarlyGame:
         bot.build.assert_not_awaited()
 
     async def test_phase_0_builds_pylon_when_supply_low(self):
-        bot = _make_bot(supply_left=2, early_game_phase=0, gateways=0)
+        bot = _make_bot(supply_left=2, early_game_phase=0, gateways=0, pylons=0)
         await bot.manage_early_game()
         bot.build.assert_awaited_once()
+        assert bot._last_override_source == "early_game_build_order"
+        assert bot._last_executed_intent == {"type": "BUILD_STRUCTURE", "target": "PYLON"}
 
     async def test_phase_0_skips_pylon_when_supply_ok(self):
         bot = _make_bot(supply_left=6, early_game_phase=0, gateways=0)
@@ -148,6 +164,8 @@ class TestManageEarlyGame:
         bot = _make_bot(early_game_phase=1, gateways=0)
         await bot.manage_early_game()
         bot.build.assert_awaited_once()
+        assert bot._last_override_source == "early_game_build_order"
+        assert bot._last_executed_intent == {"type": "BUILD_STRUCTURE", "target": "GATEWAY"}
 
     async def test_phase_1_advances_when_gateway_exists(self):
         bot = _make_bot(early_game_phase=1, gateways=1)
@@ -171,11 +189,112 @@ class TestManageEarlyGame:
         await bot.manage_early_game()
         assert bot._early_game_phase >= 2
 
-    async def test_phase_3_researches_warp_gate(self):
-        bot = _make_bot(early_game_phase=3, gateways=1, cyber_cores=1, cyber_cores_ready=1)
+    async def test_phase_4_researches_warp_gate(self):
+        bot = _make_bot(early_game_phase=4, gateways=1, cyber_cores=1, cyber_cores_ready=1)
         bot.already_pending_upgrade.return_value = False
         await bot.manage_early_game()
-        assert bot._early_game_phase == 4
+        assert bot._early_game_phase == 5
+        assert bot._last_override_source == "early_game_build_order"
+        assert bot._last_executed_intent == {"type": "RESEARCH_UPGRADE", "target": "WARPGATERESEARCH"}
+
+    def test_decision_record_includes_early_game_context(self):
+        bot = _make_bot(early_game_phase=2)
+        bot.policy_mode = "ml_shadow"
+        bot.strategy_profile_name = None
+        bot._active_profile = SimpleNamespace(name="standard_macro")
+        bot._decision_state = SimpleNamespace(name="DEFEND")
+        bot._last_override_source = "early_game_build_order"
+        bot._last_executed_intent = {"type": "BUILD_STRUCTURE", "target": "CYBERNETICSCORE"}
+        action = Action(type=ActionType.BUILD_STRUCTURE, target="FORGE", score=0.42)
+
+        record = bot._build_decision_record(iteration=7, features={"game_time_seconds": 12}, action=action)
+
+        assert record["policy_mode"] == "ml_shadow"
+        assert record["selected_policy"] == "heuristic"
+        assert record["strategic_state"] == "DEFEND"
+        assert record["early_game_phase"] == 2
+        assert record["override_source"] == "early_game_build_order"
+        assert record["executed_intent"] == {"type": "BUILD_STRUCTURE", "target": "CYBERNETICSCORE"}
+        assert record["utility"]["recommended_action"] == {"type": "BUILD_STRUCTURE", "target": "FORGE", "score": 0.42}
+
+    def test_decision_record_handles_missing_optional_context(self):
+        bot = _make_bot(early_game_phase=4)
+        bot.policy_mode = "ml_shadow"
+        bot.strategy_profile_name = "standard_macro"
+        bot._decision_state = SimpleNamespace(name="DEFEND")
+        bot._bias_calculator = None
+
+        record = bot._build_decision_record(iteration=8, features={"game_time_seconds": 30}, action=None)
+
+        assert record["override_source"] == "none"
+        assert record["executed_intent"] is None
+        assert record["utility"]["recommended_action"] is None
+        assert record["utility"]["bias_vector"] == {}
+        assert record["shadow_predictions"] == []
+
+    def test_decision_record_includes_available_shadow_prediction(self):
+        bot = _make_bot(early_game_phase=4)
+        bot.policy_mode = "ml_shadow"
+        bot.strategy_profile_name = "standard_macro"
+        bot._decision_state = SimpleNamespace(name="DEFEND")
+        bot._last_shadow_predictions = [
+            {
+                "profile": "stargate_open",
+                "recommended_action": {
+                    "type": "BUILD_STRUCTURE",
+                    "target": "STARGATE",
+                    "score": 0.72,
+                },
+            },
+        ]
+
+        record = bot._build_decision_record(iteration=8, features={"game_time_seconds": 30}, action=None)
+
+        assert record["shadow_predictions"] == [
+            {
+                "profile": "stargate_open",
+                "recommended_action": {
+                    "type": "BUILD_STRUCTURE",
+                    "target": "STARGATE",
+                    "score": 0.72,
+                },
+            },
+        ]
+
+    def test_write_decision_record_writes_valid_jsonl(self, tmp_path):
+        bot = _make_bot(early_game_phase=4)
+        bot.policy_mode = "heuristic"
+        bot.strategy_profile_name = "standard_macro"
+        bot._decision_state = SimpleNamespace(name="DEFEND")
+        bot._decisions_file = str(tmp_path / "decisions.jsonl")
+
+        bot._write_decision_record(9, {"game_time_seconds": 44}, None)
+
+        lines = (tmp_path / "decisions.jsonl").read_text().splitlines()
+        assert len(lines) == 1
+        record = json.loads(lines[0])
+        assert record["step"] == 9
+        assert "minerals" not in record
+        assert record["utility"]["recommended_action"] is None
+
+    def test_write_decision_record_persists_shadow_prediction(self, tmp_path):
+        bot = _make_bot(early_game_phase=4)
+        bot.policy_mode = "ml_shadow"
+        bot.strategy_profile_name = "standard_macro"
+        bot._decision_state = SimpleNamespace(name="DEFEND")
+        bot._decisions_file = str(tmp_path / "decisions.jsonl")
+        bot._last_shadow_predictions = [
+            {"profile": "stargate_open", "recommended_action": {"type": "BUILD_UNIT", "target": "STALKER", "score": 0.85}},
+        ]
+
+        bot._write_decision_record(10, {"game_time_seconds": 50}, None)
+
+        record = json.loads((tmp_path / "decisions.jsonl").read_text())
+        assert record["policy_mode"] == "ml_shadow"
+        assert record["selected_policy"] == "heuristic"
+        assert record["shadow_predictions"] == [
+            {"profile": "stargate_open", "recommended_action": {"type": "BUILD_UNIT", "target": "STALKER", "score": 0.85}},
+        ]
 
     async def test_all_phases_complete_returns_without_side_effects(self):
         bot = _make_bot(time=50.0, early_game_phase=4)
@@ -183,6 +302,19 @@ class TestManageEarlyGame:
         bot.already_pending_upgrade.reset_mock()
         await bot.manage_early_game()
         bot.build.assert_not_awaited()
+
+    async def test_fast_expand_phase_3_builds_nexus_when_no_pressure(self):
+        bot = _make_bot(time=60.0, early_game_phase=3, early_game_phase_start=55.0, pressure_level=PressureLevel.NONE)
+        bot.build.reset_mock()
+        await bot.manage_early_game()
+        bot.build.assert_awaited_once()
+
+    async def test_fast_expand_skipped_under_medium_pressure(self):
+        bot = _make_bot(time=60.0, early_game_phase=3, early_game_phase_start=55.0, pressure_level=PressureLevel.MEDIUM)
+        bot.build.reset_mock()
+        await bot.manage_early_game()
+        bot.build.assert_not_awaited()
+        assert bot._early_game_phase == 4
 
 
 class TestManageTechRework:
@@ -266,3 +398,50 @@ class TestManageExpansionMineralBanking:
         bot.expand_now.reset_mock()
         await bot.manage_expansion()
         bot.expand_now.assert_not_awaited()
+
+
+class TestShadowEngineIntegration:
+    def test_shadow_engines_produce_predictions(self):
+        bot = _make_bot()
+        bot.policy_mode = "ml_shadow"
+        bot._shadow_profiles = [("stargate_open", SimpleNamespace(name="stargate_open"))]
+        bot._last_shadow_predictions = []
+
+        mock_bias = MagicMock()
+        mock_bias.bias_vector = {"stargate_units": 0.8}
+        mock_bias.update = MagicMock(return_value={"stargate_units": 0.8})
+
+        mock_engine = MagicMock()
+        shadow_action = Action(type=ActionType.BUILD_UNIT, target="VOIDRAY", score=0.92)
+        mock_engine.evaluate = MagicMock(return_value=shadow_action)
+
+        bot._shadow_bias_calculators = [mock_bias]
+        bot._shadow_priority_engines = [mock_engine]
+        bot._scout_metadata = MagicMock()
+        bot._scout_metadata.to_dict = MagicMock(return_value={"marine": {"confidence": 0.5}})
+
+        bot._last_shadow_predictions = []
+        for i, (name, _) in enumerate(bot._shadow_profiles):
+            shadow_bias = bot._shadow_bias_calculators[i]
+            shadow_engine = bot._shadow_priority_engines[i]
+            scout_dict = bot._scout_metadata.to_dict()
+            shadow_bias.update({}, scout_dict)
+            shadow_action = shadow_engine.evaluate(
+                shadow_bias.bias_vector,
+                {},
+                own_composition={},
+                structures={},
+            )
+            bot._last_shadow_predictions.append({
+                "profile": name,
+                "recommended_action": bot._serialize_action(shadow_action),
+            })
+
+        assert len(bot._last_shadow_predictions) == 1
+        pred = bot._last_shadow_predictions[0]
+        assert pred["profile"] == "stargate_open"
+        assert pred["recommended_action"] == {
+            "type": "BUILD_UNIT",
+            "target": "VOIDRAY",
+            "score": 0.92,
+        }
